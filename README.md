@@ -211,12 +211,12 @@ Log in with **admin@gmail.com / admin@123** (change it after first login).
 
 1. **Rotate secrets** — the dev DB password and admin password were shared during development;
    reset both before any public use.
-2. **Per-role API enforcement** — middleware blocks outsiders, but `/api/products` etc. don't
-   yet check the caller's tab-role on each request. Add server-side checks (gates must be
-   server-side per the project's app-logic conventions).
-3. **`next build` Suspense error** — pre-existing: pages reading `?step=` use `useSearchParams`
-   without a `<Suspense>` boundary, which fails static prerender. Wrap those pages in
-   `<Suspense>` before a production build. (`next dev` is unaffected.)
+2. ~~**Per-role API enforcement**~~ ✅ **Done.** `/api/products` and `/api/manufacturers` now
+   check the caller's tab access server-side via `src/lib/api-guard.ts` (`requireTabAccess`),
+   returning 401/403 for callers without the relevant tab. The users API was already admin-only.
+3. ~~**`next build` Suspense error**~~ ✅ **Done.** The authenticated `(app)` group is marked
+   `export const dynamic = "force-dynamic"` in its layout (it's all session-gated and
+   data-driven, so static prerender added no value). `npm run build` now succeeds.
 4. **Files in Postgres as base64** — fine for an internal tool at small scale; move to object
    storage (S3 / Supabase Storage) later — the `MediaItem` shape is ready for URLs.
 5. **Multi-currency rollups** — cross-product totals sum raw unless converted; the per-product

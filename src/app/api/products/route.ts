@@ -5,11 +5,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { productToRow } from "@/lib/api-map";
+import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 
 // Always hit the DB fresh; this data changes constantly.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const denied = await requireTabAccess(PRODUCT_TABS);
+  if (denied) return denied;
   try {
     const products = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
     return NextResponse.json(products);
@@ -19,6 +22,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireTabAccess(PRODUCT_TABS);
+  if (denied) return denied;
   try {
     const body = await req.json();
     const data = productToRow(body);

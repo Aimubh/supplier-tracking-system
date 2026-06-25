@@ -5,10 +5,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { manufacturerToRow } from "@/lib/api-map";
+import { requireTabAccess, MANUFACTURER_TABS } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const denied = await requireTabAccess(MANUFACTURER_TABS);
+  if (denied) return denied;
   try {
     const rows = await prisma.manufacturer.findMany({ orderBy: { createdAt: "desc" } });
     return NextResponse.json(rows);
@@ -18,6 +21,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireTabAccess(MANUFACTURER_TABS);
+  if (denied) return denied;
   try {
     const body = await req.json();
     const data = manufacturerToRow(body);
