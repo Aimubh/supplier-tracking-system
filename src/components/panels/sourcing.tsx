@@ -7,7 +7,7 @@
 // SELL / CAUTION / AVOID recommendation. All auto-filled fields stay editable.
 
 import { useState } from "react";
-import { Search, Sparkles, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, Sparkles, AlertTriangle, Loader2, ExternalLink, Link as LinkIcon } from "lucide-react";
 import { useStore, type Sourcing } from "@/lib/store";
 import {
   computeSourcing,
@@ -75,6 +75,10 @@ export function SourcingPanel() {
         inputs: { ...i, ...data.inputs },
         sourceUrl: link,
         supplierName: data.raw?.supplierName ?? "",
+        supplierProductUrl: data.raw?.productUrl ?? "",
+        supplierCountry: data.raw?.country ?? "",
+        supplierImageUrl: data.raw?.productImageUrl ?? "",
+        supplierCount: data.supplierCount ?? 0,
         hsnEstimated: data.flags?.hsnEstimated ?? true,
         weightEstimated: data.flags?.weightEstimated ?? true,
       });
@@ -154,6 +158,52 @@ export function SourcingPanel() {
             {fetchMsg.tone === "warn" && <AlertTriangle className="h-3.5 w-3.5" />}
             {fetchMsg.text}
           </p>
+        )}
+
+        {/* Provenance: which supplier + product page the data came from. */}
+        {(draft.supplierProductUrl || draft.sourceUrl) && (
+          <div className="mt-3 flex items-start gap-3 border-t border-rule pt-3">
+            {draft.supplierImageUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={draft.supplierImageUrl}
+                alt=""
+                className="h-12 w-12 shrink-0 rounded-sm border border-line object-cover"
+              />
+            )}
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p className="text-[12.5px] text-body">
+                <span className="text-muted">Top supplier: </span>
+                <span className="font-semibold text-ink">{draft.supplierName || "—"}</span>
+                {draft.supplierCountry && <span className="text-muted"> · {draft.supplierCountry}</span>}
+                {draft.supplierCount > 1 && (
+                  <span className="figure ml-1 text-[11px] text-muted">(+{draft.supplierCount - 1} more)</span>
+                )}
+              </p>
+              {draft.supplierProductUrl && (
+                <a
+                  href={draft.supplierProductUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 truncate text-[12px] text-link hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{draft.supplierProductUrl}</span>
+                </a>
+              )}
+              {draft.sourceUrl && (
+                <a
+                  href={draft.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 truncate text-[11.5px] text-muted hover:underline"
+                >
+                  <LinkIcon className="h-3 w-3 shrink-0" />
+                  <span className="truncate">from: {draft.sourceUrl}</span>
+                </a>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

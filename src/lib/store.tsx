@@ -321,6 +321,10 @@ export interface Sourcing {
   // Provenance / confidence flags from the auto-fill (which fields were guessed).
   sourceUrl: string; // the pasted reel/Alibaba link
   supplierName: string; // top supplier from the scrape
+  supplierProductUrl: string; // the Alibaba product page the data was scraped from
+  supplierCountry: string; // top supplier's country
+  supplierImageUrl: string; // product image from the scrape
+  supplierCount: number; // how many suppliers the scrape returned
   hsnEstimated: boolean;
   weightEstimated: boolean;
 }
@@ -514,6 +518,10 @@ export function blankProduct(name: string): Product {
       marketSize: { ...EMPTY_MARKET_SIZE },
       sourceUrl: "",
       supplierName: "",
+      supplierProductUrl: "",
+      supplierCountry: "",
+      supplierImageUrl: "",
+      supplierCount: 0,
       hsnEstimated: false,
       weightEstimated: false,
     },
@@ -582,6 +590,10 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
     marketSize: { ...base.sourcing.marketSize, ...(stored.sourcing?.marketSize ?? {}) },
     sourceUrl: stored.sourcing?.sourceUrl ?? "",
     supplierName: stored.sourcing?.supplierName ?? "",
+    supplierProductUrl: stored.sourcing?.supplierProductUrl ?? "",
+    supplierCountry: stored.sourcing?.supplierCountry ?? "",
+    supplierImageUrl: stored.sourcing?.supplierImageUrl ?? "",
+    supplierCount: stored.sourcing?.supplierCount ?? 0,
     hsnEstimated: stored.sourcing?.hsnEstimated ?? false,
     weightEstimated: stored.sourcing?.weightEstimated ?? false,
   };
