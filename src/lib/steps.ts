@@ -32,6 +32,11 @@ export const PRE_ORDER_STEPS: ProcessStep[] = [
     desc: "Work the price backwards from what we can sell at; decide go or no-go.",
     gate: true,
   },
+  {
+    n: 5,
+    title: "Sourcing model",
+    desc: "Full per-SKU landed cost and channel margins — the LAZERECOM model with a GO / NO-GO verdict and counter-offer ceiling.",
+  },
 ];
 
 // 3) ON-WORKING / PRODUCTION — after we decide to buy.

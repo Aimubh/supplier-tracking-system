@@ -14,6 +14,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  DEFAULT_ASSUMPTIONS,
+  DEFAULT_SOURCING_INPUTS,
+  type SourcingAssumptions,
+  type SourcingInputs,
+} from "./sourcing-model";
 
 // ---- Entity types -------------------------------------------------------------
 
@@ -304,6 +310,14 @@ export interface Expenses {
   notes: string;
 }
 
+// Per-SKU sourcing & margin model (Pre-Order). Mirrors the LAZERECOM workbook:
+// editable assumptions + per-SKU inputs; the verdict/landed cost are computed by
+// src/lib/sourcing-model.ts and never stored (always derived from these).
+export interface Sourcing {
+  assumptions: SourcingAssumptions;
+  inputs: SourcingInputs;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -322,6 +336,7 @@ export interface Product {
   logistics: Logistics;
   working: Working;
   expenses: Expenses;
+  sourcing: Sourcing;
 }
 
 // ---- Defaults -----------------------------------------------------------------
@@ -486,6 +501,10 @@ export function blankProduct(name: string): Product {
       sellingPriceTotal: 0,
       notes: "",
     },
+    sourcing: {
+      assumptions: { ...DEFAULT_ASSUMPTIONS },
+      inputs: { ...DEFAULT_SOURCING_INPUTS },
+    },
   };
 }
 
@@ -543,6 +562,13 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
       };
     }
   }
+  // Sourcing is two-level (assumptions + inputs); deep-merge each so older rows
+  // (and any new fields added later) always fall back to the model defaults.
+  merged.sourcing = {
+    assumptions: { ...base.sourcing.assumptions, ...(stored.sourcing?.assumptions ?? {}) },
+    inputs: { ...base.sourcing.inputs, ...(stored.sourcing?.inputs ?? {}) },
+  };
+
   // Ensure the docImages map exists, and migrate old string entries (one base64
   // image per doc) into MediaItem arrays so several files per doc are supported.
   merged.logistics.docImages = normalizeDocImages(merged.logistics.docImages);

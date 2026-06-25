@@ -10,6 +10,7 @@ import { PackageOpen } from "lucide-react";
 import type { TabKey } from "@/lib/access";
 
 import { MarketPanel, SupplierPanel, CompliancePanel, CostingPanel } from "./panels/pre-order";
+import { SourcingPanel } from "./panels/sourcing";
 import {
   ProductDecisionPanel,
   DesignProcessingPanel,
@@ -26,7 +27,13 @@ const PANELS: Record<TabKey, Record<number, () => JSX.Element | null>> = {
   dashboard: {},
   directory: {},
   "order-summary": {},
-  "pre-order": { 1: MarketPanel, 2: SupplierPanel, 3: CompliancePanel, 4: CostingPanel },
+  "pre-order": {
+    1: MarketPanel,
+    2: SupplierPanel,
+    3: CompliancePanel,
+    4: CostingPanel,
+    5: SourcingPanel,
+  },
   "on-working": {
     1: ProductDecisionPanel,
     2: DesignProcessingPanel,

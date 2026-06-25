@@ -58,6 +58,7 @@ model Product {
   logistics  Json @default("{}") // Logistics (incl. docImages base64 files)
   working    Json @default("{}") // Working (incl. product/sample/packaging media)
   expenses   Json @default("{}") // Expenses (Order Summary P&L actuals)
+  sourcing   Json @default("{}") // Sourcing model (assumptions + per-SKU inputs)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

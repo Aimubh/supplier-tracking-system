@@ -18,6 +18,7 @@ export function productToRow(p: Record<string, unknown>) {
     logistics: (p.logistics ?? {}) as object,
     working: (p.working ?? {}) as object,
     expenses: (p.expenses ?? {}) as object,
+    sourcing: (p.sourcing ?? {}) as object,
   };
 }
 
