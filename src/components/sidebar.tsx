@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
   Search,
@@ -13,8 +13,11 @@ import {
   Lock,
   Users,
   Building2,
+  Receipt,
 } from "lucide-react";
-import { TABS, TAB_STEPS, type TabKey, CURRENT_USER, canAccess } from "@/lib/access";
+import { signOut } from "next-auth/react";
+import { TABS, TAB_STEPS, type TabKey, canAccess } from "@/lib/access";
+import { useCurrentUser } from "@/lib/use-current-user";
 import { motion, AnimatePresence, staggerParent, riseItem, useReducedMotion } from "./motion";
 
 const TAB_ICON: Record<TabKey, React.ComponentType<{ className?: string }>> = {
@@ -23,15 +26,17 @@ const TAB_ICON: Record<TabKey, React.ComponentType<{ className?: string }>> = {
   "pre-order": Search,
   "on-working": Factory,
   "post-order": Ship,
+  "order-summary": Receipt,
 };
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const user = CURRENT_USER;
+  const user = useCurrentUser();
   const reduce = useReducedMotion();
   const activeStep = Number(searchParams.get("step")) || 1;
+
+  if (!user) return null; // session still loading
 
   return (
     <aside className="sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col border-r border-line bg-white lg:flex">
@@ -178,10 +183,16 @@ export function Sidebar() {
       {user.role === "ADMIN" && (
         <div className="mt-2 px-3 py-2">
           <p className="eyebrow px-2 pb-2">Admin</p>
-          <button className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] text-body transition hover:bg-surface hover:text-ink">
-            <Users className="h-4 w-4 text-muted" />
+          <Link
+            href="/users"
+            className={clsx(
+              "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition",
+              pathname === "/users" ? "bg-ink text-white" : "text-body hover:bg-surface hover:text-ink"
+            )}
+          >
+            <Users className={clsx("h-4 w-4", pathname === "/users" ? "text-white" : "text-muted")} />
             Users &amp; access
-          </button>
+          </Link>
           <button className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] text-body transition hover:bg-surface hover:text-ink">
             <Settings className="h-4 w-4 text-muted" />
             Rate tables
@@ -204,7 +215,7 @@ export function Sidebar() {
             <p className="figure text-[10px] uppercase tracking-wider text-muted">{user.role}</p>
           </div>
           <button
-            onClick={() => router.push("/login")}
+            onClick={() => signOut({ callbackUrl: "/login" })}
             title="Sign out"
             className="ml-auto text-muted transition hover:text-coral"
           >

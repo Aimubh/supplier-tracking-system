@@ -45,6 +45,20 @@ const money = (n: number) => (n > 0 ? `$${n.toLocaleString()}` : "—");
 const pct = (n: number) => (n ? `${n}%` : "—");
 const CURRENCY_SYMBOL: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
 
+// Build the total / paid / pending rows for one payment (product or shipment).
+function payRows(name: string, total: number, advance: number, currency: CurrencyCode): Field[] {
+  if (!total) return [];
+  const sym = CURRENCY_SYMBOL[currency ?? "INR"];
+  const adv = Math.min(advance ?? 0, total);
+  const pending = Math.max(total - adv, 0);
+  const pc = (n: number) => Math.round((n / total) * 100);
+  return [
+    { label: `${name} total`, value: `${sym}${total.toLocaleString()} ${currency}` },
+    { label: `${name} paid`, value: `${sym}${adv.toLocaleString()} · ${pc(adv)}%`, tone: "go" },
+    { label: `${name} pending`, value: `${sym}${pending.toLocaleString()} · ${pc(pending)}%`, tone: pending > 0 ? "pending" : "go" },
+  ];
+}
+
 export function ProductViewModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { products } = useStore();
   const reduce = useReducedMotion();
@@ -169,20 +183,8 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
     { label: "Order qty (MOQ)", value: w.moq > 0 ? w.moq.toLocaleString() : "—" },
     { label: "MOQ note", value: dash(w.moqNote) },
     { label: "Rate term", value: w.rateValue > 0 ? w.rate : "—" },
-    {
-      label: "Total amount",
-      value: w.rateValue > 0 ? `${CURRENCY_SYMBOL[w.rateCurrency ?? "USD"]}${w.rateValue.toLocaleString()} ${w.rateCurrency ?? "USD"}` : "—",
-    },
-    {
-      label: "Advance paid",
-      value: w.rateValue > 0 ? `${CURRENCY_SYMBOL[w.rateCurrency ?? "USD"]}${Math.min(w.advancePaid ?? 0, w.rateValue).toLocaleString()} · ${Math.round((Math.min(w.advancePaid ?? 0, w.rateValue) / w.rateValue) * 100)}%` : "—",
-      tone: "go",
-    },
-    {
-      label: "Pending",
-      value: w.rateValue > 0 ? `${CURRENCY_SYMBOL[w.rateCurrency ?? "USD"]}${Math.max(w.rateValue - (w.advancePaid ?? 0), 0).toLocaleString()} · ${Math.round((Math.max(w.rateValue - (w.advancePaid ?? 0), 0) / w.rateValue) * 100)}%` : "—",
-      tone: Math.max(w.rateValue - (w.advancePaid ?? 0), 0) > 0 ? "pending" : "go",
-    },
+    ...payRows("Product", w.rateValue, w.advancePaid, w.rateCurrency),
+    ...payRows("Shipment", w.shipmentValue, w.shipmentAdvance, w.shipmentCurrency),
     { label: "Mould required", ...yn(w.moldRequired, "Required", "Not required") },
     {
       label: "Logo / packaging",
@@ -217,6 +219,11 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
       icon: Truck,
       title: "Shipment & movement",
       fields: [
+        { label: "POL (origin)", value: dash(L.pol) },
+        { label: "POD (destination)", value: dash(L.pod) },
+        { label: "Packages", value: dash(L.packages) },
+        { label: "Gross weight", value: L.grossWeightKg > 0 ? `${L.grossWeightKg.toLocaleString()} kg` : "—" },
+        { label: "Volume", value: L.volumeCbm > 0 ? `${L.volumeCbm} CBM` : "—" },
         { label: "Vessel", value: dash(L.vessel) },
         { label: "Container no.", value: dash(L.containerNo) },
         { label: "B/L number", value: dash(L.blNumber) },
@@ -278,6 +285,7 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
       title: "Receipt & GRN",
       fields: [
         { label: "Chassis no.", value: dash(L.chassisNo) },
+        { label: "Port-to-warehouse", value: L.indiaTransportCost > 0 ? `₹${L.indiaTransportCost.toLocaleString()}` : "—" },
         { label: "Ordered qty", value: dash(L.orderedQty) },
         { label: "Received qty", value: dash(L.receivedQty) },
         { label: "Invoiced qty", value: dash(L.invoicedQty) },

@@ -1,0 +1,102 @@
+// Supplier Tracking System — Prisma schema.
+//
+// v1 strategy: relational top-level models (Product, Manufacturer) with the
+// deeply-nested per-phase slices (working / logistics / compliance / costing /
+// supplier) and the arrays (market entries, payments, media, catalogs) stored as
+// JSON columns. This mirrors the app's existing shape one-to-one so the client
+// store can swap from localStorage to the API with almost no UI change. These
+// JSON blobs can be normalised into dedicated tables in a later phase.
+//
+// Files (photos / videos / PDF scans) are kept as base64 data URLs inside the
+// JSON, matching current behaviour. They can move to object storage later.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled — used by the app at runtime
+  directUrl = env("DIRECT_URL")   // direct — used by Prisma Migrate
+}
+
+// Team member who can sign in. Created by an admin (no public sign-up).
+// `access` lists the tab keys an EMPLOYEE may open; ADMIN implicitly sees all.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("EMPLOYEE") // ADMIN | EMPLOYEE
+  access       String[] @default([]) // tab keys, e.g. ["dashboard","pre-order"]
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}
+
+// A candidate product moving through the sourcing pipeline.
+model Product {
+  id        String   @id @default(uuid())
+  name      String
+  category  String   @default("")
+
+  // Filed = archived to the dashboard, removed from the active process.
+  filed     Boolean   @default(false)
+  filedAt   DateTime?
+
+  // Nested phase slices — shapes match the TS interfaces in src/lib/store.tsx.
+  market     Json @default("[]") // MarketEntry[]
+  supplier   Json @default("{}") // Supplier
+  compliance Json @default("{}") // Compliance
+  costing    Json @default("{}") // Costing
+  po         Json @default("{}") // PurchaseOrder
+  payments   Json @default("[]") // Payment[]
+  production Json @default("{}") // Production
+  qc         Json @default("{}") // QualityInspection
+  logistics  Json @default("{}") // Logistics (incl. docImages base64 files)
+  working    Json @default("{}") // Working (incl. product/sample/packaging media)
+  expenses   Json @default("{}") // Expenses (Order Summary P&L actuals)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([filed])
+  @@index([createdAt])
+}
+
+// Reusable address book of factories / trading companies — independent of any
+// single product (vet once, reuse across many).
+model Manufacturer {
+  id            String   @id @default(uuid())
+  name          String
+  type          String   @default("FACTORY") // FACTORY | TRADING | UNKNOWN
+  verification  String   @default("UNVERIFIED")
+  city          String   @default("")
+  address       String   @default("")
+  productLines  String   @default("")
+
+  // Business certification.
+  certNumber    String   @default("")
+  certImage     String   @default("") // base64 data URL
+
+  // Representative we deal with.
+  repName       String   @default("")
+  repNumber     String   @default("")
+  repWechat     String   @default("")
+  repWechatQr   String   @default("") // base64 data URL of the WeChat QR
+
+  website       String   @default("")
+  moq           String   @default("") // free text, varies per item
+  rating        Int      @default(0)  // 0–5
+  notes         String   @default("")
+
+  catalogs      Json     @default("[]") // CatalogItem[] (base64 files inline)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([type])
+  @@index([createdAt])
+}

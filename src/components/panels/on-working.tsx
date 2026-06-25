@@ -53,6 +53,86 @@ function SubHead({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+const CURRENCY_OPTIONS: { value: CurrencyCode; label: string }[] = [
+  { value: "INR", label: "INR — Indian Rupee" },
+  { value: "USD", label: "USD — US Dollar" },
+  { value: "CNY", label: "CNY — Chinese Yuan" },
+];
+
+// A single payment block: currency + total + advance, with an auto advance /
+// pending split and a proportion bar. Used for both product and shipment.
+function PaymentBlock({
+  title,
+  subtitle,
+  currency,
+  total,
+  advance,
+  onCurrency,
+  onTotal,
+  onAdvance,
+}: {
+  title: string;
+  subtitle: string;
+  currency: CurrencyCode;
+  total: number;
+  advance: number;
+  onCurrency: (c: CurrencyCode) => void;
+  onTotal: (n: number) => void;
+  onAdvance: (n: number) => void;
+}) {
+  const sym = CURRENCY_SYMBOL[currency];
+  const t = total || 0;
+  const adv = Math.min(advance || 0, t);
+  const pending = Math.max(t - adv, 0);
+  const pct = (n: number) => (t > 0 ? Math.round((n / t) * 100) : 0);
+  const fmt = (n: number) => `${sym}${n.toLocaleString()}`;
+
+  return (
+    <div className="rounded-md border border-line bg-surface p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h4 className="text-[14px] font-semibold text-ink">{title}</h4>
+        <span className="text-[12px] text-muted">{subtitle}</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Currency">
+          <Select value={currency} onChange={onCurrency} options={CURRENCY_OPTIONS} />
+        </Field>
+        <Field label="Total amount">
+          <Num value={total} onChange={onTotal} prefix={sym} placeholder="0" blankZero />
+        </Field>
+        <Field label="Advance paid">
+          <Num value={advance} onChange={onAdvance} prefix={sym} placeholder="0" blankZero />
+        </Field>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="rounded-md border border-line bg-white px-2.5 py-2">
+          <p className="eyebrow">Total</p>
+          <p className="figure mt-0.5 text-[14px] font-semibold text-ink">{t > 0 ? fmt(t) : "—"}</p>
+        </div>
+        <div className="rounded-md border border-line bg-white px-2.5 py-2">
+          <p className="eyebrow">Paid · {pct(adv)}%</p>
+          <p className="figure mt-0.5 text-[14px] font-semibold text-go">{t > 0 ? fmt(adv) : "—"}</p>
+        </div>
+        <div className="rounded-md border border-line bg-white px-2.5 py-2">
+          <p className="eyebrow">Pending · {pct(pending)}%</p>
+          <p className={`figure mt-0.5 text-[14px] font-semibold ${pending > 0 ? "text-pending" : "text-go"}`}>
+            {t > 0 ? fmt(pending) : "—"}
+          </p>
+        </div>
+      </div>
+
+      {t > 0 && (
+        <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-surface-strong">
+          <div className="h-full bg-go" style={{ width: `${pct(adv)}%` }} />
+          <div className="h-full bg-pending" style={{ width: `${pct(pending)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- Step 1: Product Decision (Sample + MOQ + Rates + Mould) -------------------
 export function ProductDecisionPanel() {
   const { active, patch, draft, setField, dirty, saved, flashSaved, discard } = useWorkingDraft();
@@ -157,8 +237,8 @@ export function ProductDecisionPanel() {
       </div>
 
       {/* Rates */}
-      <SubHead title="Rates" hint="Lock the rate term, total amount and advance — the split is calculated for you." />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <SubHead title="Rates" hint="Two payments — one for the product, one for the shipment. Each shows its own advance / pending split." />
+      <div className="sm:max-w-xs">
         <Field label="Rate term">
           <Select
             value={w.rate}
@@ -171,72 +251,51 @@ export function ProductDecisionPanel() {
             ]}
           />
         </Field>
-        <Field label={`Total amount (${w.rate})`}>
-          <Num value={w.rateValue} onChange={(v) => setField("rateValue", v)} prefix={CURRENCY_SYMBOL[w.rateCurrency ?? "USD"]} placeholder="0" blankZero />
-        </Field>
-        <Field label="Advance paid">
-          <Num value={w.advancePaid} onChange={(v) => setField("advancePaid", v)} prefix={CURRENCY_SYMBOL[w.rateCurrency ?? "USD"]} placeholder="0" blankZero />
-        </Field>
       </div>
 
-      {/* Auto advance / pending split + what the Incoterm covers */}
-      {(() => {
-        const sym = CURRENCY_SYMBOL[w.rateCurrency ?? "USD"];
-        const cur = w.rateCurrency ?? "USD";
-        const total = w.rateValue || 0;
-        const advance = Math.min(w.advancePaid || 0, total); // never more than total
-        const pending = Math.max(total - advance, 0);
-        const pctOf = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
-        const note = INCOTERM_NOTE[w.rate];
-        const fmt = (n: number) => `${sym} ${n.toLocaleString()} ${cur}`;
-        return (
-          <div className="mt-4 rounded-md border border-line bg-surface p-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-md border border-line bg-white px-3.5 py-3">
-                <p className="eyebrow">Total · 100%</p>
-                <p className="figure mt-0.5 text-[16px] font-semibold text-ink">{total > 0 ? fmt(total) : "—"}</p>
-              </div>
-              <div className="rounded-md border border-line bg-white px-3.5 py-3">
-                <p className="eyebrow">Advance · {pctOf(advance)}%</p>
-                <p className="figure mt-0.5 text-[16px] font-semibold text-go">{total > 0 ? fmt(advance) : "—"}</p>
-              </div>
-              <div className="rounded-md border border-line bg-white px-3.5 py-3">
-                <p className="eyebrow">Pending · {pctOf(pending)}%</p>
-                <p className={`figure mt-0.5 text-[16px] font-semibold ${pending > 0 ? "text-pending" : "text-go"}`}>
-                  {total > 0 ? fmt(pending) : "—"}
-                </p>
-              </div>
-            </div>
+      {/* Two payment blocks: product + shipment */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <PaymentBlock
+          title="Product payment"
+          subtitle={`Goods (${w.rate})`}
+          currency={w.rateCurrency ?? "INR"}
+          total={w.rateValue}
+          advance={w.advancePaid}
+          onCurrency={(c) => setField("rateCurrency", c)}
+          onTotal={(n) => setField("rateValue", n)}
+          onAdvance={(n) => setField("advancePaid", n)}
+        />
+        <PaymentBlock
+          title="Shipment payment"
+          subtitle="Freight / forwarder"
+          currency={w.shipmentCurrency ?? "INR"}
+          total={w.shipmentValue}
+          advance={w.shipmentAdvance}
+          onCurrency={(c) => setField("shipmentCurrency", c)}
+          onTotal={(n) => setField("shipmentValue", n)}
+          onAdvance={(n) => setField("shipmentAdvance", n)}
+        />
+      </div>
 
-            {/* Split bar */}
-            {total > 0 && (
-              <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-surface-strong">
-                <div className="h-full bg-go" style={{ width: `${pctOf(advance)}%` }} />
-                <div className="h-full bg-pending" style={{ width: `${pctOf(pending)}%` }} />
-              </div>
-            )}
-
-            {note && (
-              <div className="mt-3 border-t border-line pt-3 text-[12px] leading-relaxed">
-                <p className="text-body">
-                  <span className="font-semibold text-go">{w.rate} includes:</span> {note.covers}
-                </p>
-                <p className="mt-1 text-pending">
-                  <span className="font-semibold">Not included:</span> {note.add}
-                </p>
-                <p className="mt-1.5 text-muted">
-                  This is the goods order value only — see the Pre-Order · Costing tab for the full landed cost and GO / NO-GO.
-                </p>
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {/* What the Incoterm covers vs. doesn't */}
+      {INCOTERM_NOTE[w.rate] && (
+        <div className="mt-4 rounded-md border border-line bg-surface p-4 text-[12px] leading-relaxed">
+          <p className="text-body">
+            <span className="font-semibold text-go">{w.rate} includes:</span> {INCOTERM_NOTE[w.rate].covers}
+          </p>
+          <p className="mt-1 text-pending">
+            <span className="font-semibold">Not included:</span> {INCOTERM_NOTE[w.rate].add}
+          </p>
+          <p className="mt-1.5 text-muted">
+            See the Pre-Order · Costing tab for the full landed cost and GO / NO-GO.
+          </p>
+        </div>
+      )}
 
       <div className="mt-4">
         <CurrencyConverter
           amount={w.rateValue}
-          currency={w.rateCurrency ?? "USD"}
+          currency={w.rateCurrency ?? "INR"}
           onCurrencyChange={(c) => setField("rateCurrency", c)}
         />
       </div>

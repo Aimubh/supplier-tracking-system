@@ -1,8 +1,11 @@
-import { Lock } from "lucide-react";
-import { CURRENT_USER, canAccess, type TabKey } from "@/lib/access";
+"use client";
 
-// Renders children only if the current user may access the tab.
-// UI-only gate for now; real enforcement lands with server-side auth + middleware.
+import { Lock } from "lucide-react";
+import { canAccess, type TabKey } from "@/lib/access";
+import { useCurrentUser } from "@/lib/use-current-user";
+
+// Renders children only if the signed-in user may access the tab. This is the UI
+// guard; the API routes enforce the same access server-side.
 export function TabGuard({
   tab,
   children,
@@ -10,7 +13,9 @@ export function TabGuard({
   tab: TabKey;
   children: React.ReactNode;
 }) {
-  if (canAccess(CURRENT_USER, tab)) return <>{children}</>;
+  const user = useCurrentUser();
+  if (!user) return null; // session loading
+  if (canAccess(user, tab)) return <>{children}</>;
 
   return (
     <main className="flex flex-1 items-center justify-center px-6 py-20">

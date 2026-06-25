@@ -25,6 +25,7 @@ import {
 const PANELS: Record<TabKey, Record<number, () => JSX.Element | null>> = {
   dashboard: {},
   directory: {},
+  "order-summary": {},
   "pre-order": { 1: MarketPanel, 2: SupplierPanel, 3: CompliancePanel, 4: CostingPanel },
   "on-working": {
     1: ProductDecisionPanel,

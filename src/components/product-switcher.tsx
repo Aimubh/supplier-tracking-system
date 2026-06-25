@@ -47,7 +47,7 @@ export function ProductSwitcher() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="eyebrow block">Active product</span>
-            <span className="block truncate text-[13px] font-semibold text-white">
+            <span className="block truncate text-[13px] font-semibold text-ink">
               {active ? active.name : "None selected"}
             </span>
           </span>
@@ -65,7 +65,7 @@ export function ProductSwitcher() {
         {active && (
           <button
             onClick={finishAndFile}
-            className="flex h-[42px] items-center gap-1.5 rounded-xl bg-ink px-3 text-[13px] font-semibold text-white transition hover:brightness-110"
+            className="flex h-[42px] items-center gap-1.5 rounded-xl bg-ink px-3 text-[13px] font-semibold text-white transition hover:bg-brand-600"
             title="File this product to the dashboard and clear the process"
           >
             <CheckCircle2 className="h-4 w-4" /> Finish &amp; file

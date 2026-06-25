@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { Eye, EyeOff, Loader2, ArrowRight, Check } from "lucide-react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 
-// Default admin credentials (UI-only mock — replace with real Auth.js when the
-// backend lands). Single source of truth to swap out.
+// Seeded admin login, for convenience (the "Fill" button). Real verification
+// happens server-side against the DB via NextAuth.
 const DEFAULT_ADMIN = {
   email: "admin@gmail.com",
   password: "admin@123",
@@ -23,7 +24,7 @@ export function LoginForm() {
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!email || !password) {
@@ -31,19 +32,22 @@ export function LoginForm() {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      const ok =
-        email.trim().toLowerCase() === DEFAULT_ADMIN.email &&
-        password === DEFAULT_ADMIN.password;
-      if (!ok) {
-        setLoading(false);
-        setError("Invalid email or password.");
-        return;
-      }
+    const res = await signIn("credentials", {
+      email: email.trim().toLowerCase(),
+      password,
+      redirect: false,
+    });
+    if (!res || res.error) {
       setLoading(false);
-      setAuthorized(true);
-      setTimeout(() => router.push("/"), 850);
-    }, 800);
+      setError("Invalid email or password.");
+      return;
+    }
+    setLoading(false);
+    setAuthorized(true);
+    setTimeout(() => {
+      router.push("/");
+      router.refresh();
+    }, 650);
   }
 
   const field =

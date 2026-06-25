@@ -14,7 +14,8 @@ export type TabKey =
   | "directory"
   | "pre-order"
   | "on-working"
-  | "post-order";
+  | "post-order"
+  | "order-summary";
 
 export const TABS: { key: TabKey; label: string; tagline: string }[] = [
   { key: "dashboard", label: "Dashboard", tagline: "Overview across the pipeline" },
@@ -22,6 +23,7 @@ export const TABS: { key: TabKey; label: string; tagline: string }[] = [
   { key: "pre-order", label: "Pre-Order", tagline: "Decide before we spend a rupee" },
   { key: "on-working", label: "On-Working", tagline: "After we decide to buy" },
   { key: "post-order", label: "Post-Order", tagline: "Getting it home" },
+  { key: "order-summary", label: "Order Summary", tagline: "Per-product P&L: amounts, expenses, profit" },
 ];
 
 export type Role = "ADMIN" | "EMPLOYEE";

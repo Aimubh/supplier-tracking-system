@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
+import { AuthSessionProvider } from "@/components/session-provider";
 
 // Body + display run the same Inter family at modest weights — the Airtable
 // system prefers size and color contrast over heavy weight. Inter is the
@@ -43,7 +44,7 @@ export default function RootLayout({
       className={`${inter.variable} ${interTight.variable} ${interMono.variable}`}
     >
       <body className="min-h-screen bg-base font-body text-body antialiased">
-        {children}
+        <AuthSessionProvider>{children}</AuthSessionProvider>
       </body>
     </html>
   );

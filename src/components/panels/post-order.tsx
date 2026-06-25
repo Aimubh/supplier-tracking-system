@@ -69,6 +69,20 @@ export function DispatchDocsPanel() {
         <Field label="Bill of Lading no." hint="no B/L, no delivery"><Text value={l.blNumber} onChange={(v) => setField("blNumber", v)} placeholder="B/L number" /></Field>
       </div>
 
+      {/* Shipment details — lane + dimensions (drive the freight/destination charges) */}
+      <div className="mb-6 rounded-md border border-line bg-surface p-4">
+        <p className="eyebrow mb-3">Shipment details</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="POL — Port of Loading"><Text value={l.pol} onChange={(v) => setField("pol", v)} placeholder="e.g. Ningbo" /></Field>
+          <Field label="POD — Port of Discharge"><Text value={l.pod} onChange={(v) => setField("pod", v)} placeholder="e.g. Nhava Sheva" /></Field>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Packages" hint="cartons / pkgs"><Num value={l.packages} onChange={(v) => setField("packages", v)} blankZero placeholder="0" /></Field>
+          <Field label="Gross weight (kg)"><Num value={l.grossWeightKg} onChange={(v) => setField("grossWeightKg", v)} blankZero placeholder="0" /></Field>
+          <Field label="Volume (CBM)" hint="drives THC / CFS"><Num value={l.volumeCbm} onChange={(v) => setField("volumeCbm", v)} blankZero placeholder="0" /></Field>
+        </div>
+      </div>
+
       {/* Shipping agent */}
       <div className="mb-6 rounded-md border border-line bg-surface p-4">
         <p className="eyebrow mb-3">Shipping agent</p>
@@ -312,6 +326,7 @@ export function ArrivalPanel() {
       />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Vehicle chassis no." hint="track the last-mile vehicle"><Text value={l.chassisNo} onChange={(v) => setField("chassisNo", v)} placeholder="chassis / vehicle no." /></Field>
+        <Field label="Port-to-warehouse cost (₹)" hint="cost to bring goods from the port to our warehouse"><Num value={l.indiaTransportCost} onChange={(v) => setField("indiaTransportCost", v)} prefix="₹" blankZero placeholder="0" /></Field>
       </div>
       <p className="eyebrow mb-2 mt-5">Goods Received Note — 3-way reconciliation</p>
       <div className="grid grid-cols-3 gap-3">

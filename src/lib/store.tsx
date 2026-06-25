@@ -1,8 +1,8 @@
 "use client";
 
-// Client-side data store for the UI-only build. Persists to localStorage so data
-// entered in one tab flows to others and survives refresh. Structured to mirror
-// the eventual Prisma entities so it can be swapped for a real backend later.
+// Client data store, backed by the API (PostgreSQL via Prisma). Loads on mount,
+// keeps an optimistic local copy for a snappy UI, and persists every change to
+// the server (debounced for edits, immediate for create/delete).
 
 import {
   createContext,
@@ -10,6 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -54,9 +55,14 @@ export interface Working {
   moq: number; // decided order quantity
   moqNote: string;
   rate: Incoterm; // FOB / CIF / EXW / FCA
-  rateValue: number; // agreed TOTAL deal amount at that incoterm
-  rateCurrency: CurrencyCode; // currency the agreed amount is entered in
-  advancePaid: number; // advance already paid toward the total (same currency)
+  // Product payment — the goods deal.
+  rateValue: number; // agreed TOTAL product amount at that incoterm
+  rateCurrency: CurrencyCode; // currency the product amount is entered in
+  advancePaid: number; // advance already paid toward the product total
+  // Shipment payment — freight / forwarder, tracked separately (own currency).
+  shipmentValue: number; // agreed TOTAL shipment amount
+  shipmentCurrency: CurrencyCode; // currency for the shipment amount
+  shipmentAdvance: number; // advance already paid toward the shipment total
   moldRequired: boolean;
   packagingDone: boolean; // derived: true once the logo/packaging is APPROVED
   // Packaging / logo design review: upload proofs, then approve or reject.
@@ -144,6 +150,13 @@ export interface Logistics {
   vessel: string;
   containerNo: string;
   blNumber: string;
+  // Shipment lane + dimensions (from the forwarder quote). CBM & weight drive the
+  // destination charges (THC/CFS are per CBM or per ton).
+  pol: string; // Port of Loading (origin, e.g. Ningbo)
+  pod: string; // Port of Discharge (destination, e.g. Nhava Sheva)
+  packages: number; // number of packages / cartons
+  grossWeightKg: number; // total gross weight in kg
+  volumeCbm: number; // total volume in CBM (cubic metres)
   // Shipping agent / freight forwarder handling the dispatch.
   shippingAgentName: string;
   shippingAgentNumber: string;
@@ -205,6 +218,7 @@ export interface Logistics {
   docImages: Record<string, MediaItem[]>;
   // last-mile + GRN
   chassisNo: string;
+  indiaTransportCost: number; // port → our warehouse (last-mile, ₹)
   orderedQty: number;
   receivedQty: number;
   invoicedQty: number;
@@ -266,6 +280,30 @@ export const PRODUCT_CATEGORIES = [
   "Other",
 ] as const;
 
+// Actual landed-cost expenses for the Order Summary P&L. These are real amounts
+// the team records (vs. the per-unit estimates in Costing). Currency follows the
+// product's rate currency. "Final expense" = goods total + all of these.
+//
+// Freight is itemised to match a forwarder quote: Ocean freight + the India-side
+// destination charges (DO / THC / CFS / WGMT) + GST. `freightActual` is kept as a
+// legacy single field so older records still load; the UI sums the itemised lines.
+export interface Expenses {
+  freightActual: number; // legacy single freight figure (migrated/kept)
+  // Itemised freight & destination charges.
+  oceanFreight: number; // sea freight (POL → POD)
+  doCharge: number; // Delivery Order fee
+  thcCharge: number; // Terminal Handling Charge
+  cfsCharge: number; // Container Freight Station handling
+  wgmtCharge: number; // weighment
+  gstCharge: number; // GST on the destination charges
+  dutyActual: number; // customs duty + IGST paid
+  chaCharges: number; // clearing agent / customs broker fees
+  lastMileCost: number; // port/warehouse → our warehouse
+  otherExpense: number; // misc (inspection, insurance, bank, etc.)
+  sellingPriceTotal: number; // expected total revenue (for profit/loss)
+  notes: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -283,6 +321,7 @@ export interface Product {
   qc: QualityInspection;
   logistics: Logistics;
   working: Working;
+  expenses: Expenses;
 }
 
 // ---- Defaults -----------------------------------------------------------------
@@ -343,6 +382,11 @@ export function blankProduct(name: string): Product {
       vessel: "",
       containerNo: "",
       blNumber: "",
+      pol: "",
+      pod: "",
+      packages: 0,
+      grossWeightKg: 0,
+      volumeCbm: 0,
       shippingAgentName: "",
       shippingAgentNumber: "",
       shippingAgentContact: "",
@@ -394,6 +438,7 @@ export function blankProduct(name: string): Product {
       docTechWriteup: false,
       docImages: {},
       chassisNo: "",
+      indiaTransportCost: 0,
       orderedQty: 0,
       receivedQty: 0,
       invoicedQty: 0,
@@ -411,8 +456,11 @@ export function blankProduct(name: string): Product {
       moqNote: "",
       rate: "FOB",
       rateValue: 0,
-      rateCurrency: "USD",
+      rateCurrency: "INR",
       advancePaid: 0,
+      shipmentValue: 0,
+      shipmentCurrency: "INR",
+      shipmentAdvance: 0,
       moldRequired: false,
       packagingDone: false,
       packagingMedia: [],
@@ -422,6 +470,21 @@ export function blankProduct(name: string): Product {
       productionStart: "",
       productionReady: "",
       dispatched: false,
+    },
+    expenses: {
+      freightActual: 0,
+      oceanFreight: 0,
+      doCharge: 0,
+      thcCharge: 0,
+      cfsCharge: 0,
+      wgmtCharge: 0,
+      gstCharge: 0,
+      dutyActual: 0,
+      chaCharges: 0,
+      lastMileCost: 0,
+      otherExpense: 0,
+      sellingPriceTotal: 0,
+      notes: "",
     },
   };
 }
@@ -467,6 +530,7 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
     "qc",
     "logistics",
     "working",
+    "expenses",
   ];
   const mergedRec = merged as unknown as Record<string, unknown>;
   const storedRec = stored as unknown as Record<string, unknown>;
@@ -547,6 +611,8 @@ interface StoreShape {
   reopenProduct: (id: string) => void;
   // update a slice of the active product
   patch: <K extends keyof Product>(key: K, value: Product[K]) => void;
+  // update a slice of any product by id (used by Order Summary, etc.)
+  patchProduct: <K extends keyof Product>(id: string, key: K, value: Product[K]) => void;
   uid: (prefix?: string) => string;
   // ---- Manufacturer / trader directory (top-level, reusable) ----
   manufacturers: Manufacturer[];
@@ -557,46 +623,70 @@ interface StoreShape {
 
 const StoreCtx = createContext<StoreShape | null>(null);
 
-const KEY = "sourcing-tracker:v1";
+// ---- API helpers --------------------------------------------------------------
+
+async function apiGet<T>(url: string): Promise<T[]> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET ${url} failed`);
+  return res.json();
+}
+
+function apiSend(method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) {
+  return fetch(url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  }).catch(() => {
+    /* network errors are swallowed; local state stays optimistic */
+  });
+}
+
+// Per-entity debounced PATCH so rapid edits collapse into one network write.
+function useDebouncedSaver(delay = 600) {
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const save = useCallback(
+    (url: string, body: unknown) => {
+      const key = url;
+      clearTimeout(timers.current[key]);
+      timers.current[key] = setTimeout(() => apiSend("PATCH", url, body), delay);
+    },
+    [delay]
+  );
+  return save;
+}
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [activeId, setActiveIdState] = useState<string | null>(null);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [, setHydrated] = useState(false);
+  const saveProductDebounced = useDebouncedSaver();
+  const saveManufacturerDebounced = useDebouncedSaver();
 
-  // Load once on mount.
+  // Load from the API once on mount.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as {
-          products: Product[];
-          activeId: string | null;
-          manufacturers?: Manufacturer[];
-        };
-        // Backfill any fields added after a product was first saved (e.g. docImages),
-        // so older stored products never hit undefined nested values.
-        const migrated = (parsed.products ?? []).map(migrateProduct);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [prods, mfrs] = await Promise.all([
+          apiGet<Partial<Product>>("/api/products"),
+          apiGet<Manufacturer>("/api/manufacturers"),
+        ]);
+        if (cancelled) return;
+        const migrated = prods.map(migrateProduct);
         setProducts(migrated);
-        setActiveIdState(parsed.activeId ?? migrated[0]?.id ?? null);
-        setManufacturers(parsed.manufacturers ?? []);
+        setActiveIdState(migrated[0]?.id ?? null);
+        setManufacturers(mfrs);
+      } catch {
+        /* leave empty on failure */
+      } finally {
+        if (!cancelled) setHydrated(true);
       }
-    } catch {
-      /* ignore */
-    }
-    setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // Persist on change (after hydration so we don't clobber stored data).
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ products, activeId, manufacturers }));
-    } catch {
-      /* ignore */
-    }
-  }, [products, activeId, manufacturers, hydrated]);
 
   const setActiveId = useCallback((id: string) => setActiveIdState(id), []);
 
@@ -604,18 +694,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const p = blankProduct(name || "Untitled product");
     setProducts((prev) => [...prev, p]);
     setActiveIdState(p.id);
+    apiSend("POST", "/api/products", p);
   }, []);
 
   const removeProduct = useCallback((id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
     setActiveIdState((cur) => (cur === id ? null : cur));
+    apiSend("DELETE", `/api/products/${id}`);
   }, []);
 
   // Mark a product as filed (it stays on the dashboard) and clear it out of the
   // active process so the panels go empty for the next product.
   const fileProduct = useCallback((id: string) => {
     setProducts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, filed: true, filedAt: Date.now() } : p))
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p, filed: true, filedAt: Date.now() };
+        apiSend("PATCH", `/api/products/${id}`, next);
+        return next;
+      })
     );
     setActiveIdState((cur) => (cur === id ? null : cur));
   }, []);
@@ -623,7 +720,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Bring a filed product back into the process for editing.
   const reopenProduct = useCallback((id: string) => {
     setProducts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, filed: false, filedAt: null } : p))
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p, filed: false, filedAt: null };
+        apiSend("PATCH", `/api/products/${id}`, next);
+        return next;
+      })
     );
     setActiveIdState(id);
   }, []);
@@ -631,24 +733,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const patch = useCallback(
     <K extends keyof Product>(key: K, value: Product[K]) => {
       setProducts((prev) =>
-        prev.map((p) => (p.id === activeId ? { ...p, [key]: value } : p))
+        prev.map((p) => {
+          if (p.id !== activeId) return p;
+          const next = { ...p, [key]: value };
+          saveProductDebounced(`/api/products/${p.id}`, next);
+          return next;
+        })
       );
     },
-    [activeId]
+    [activeId, saveProductDebounced]
+  );
+
+  const patchProduct = useCallback(
+    <K extends keyof Product>(id: string, key: K, value: Product[K]) => {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== id) return p;
+          const next = { ...p, [key]: value };
+          saveProductDebounced(`/api/products/${p.id}`, next);
+          return next;
+        })
+      );
+    },
+    [saveProductDebounced]
   );
 
   const addManufacturer = useCallback(() => {
     const m = blankManufacturer();
     setManufacturers((prev) => [m, ...prev]);
+    apiSend("POST", "/api/manufacturers", m);
     return m.id;
   }, []);
 
-  const updateManufacturer = useCallback((id: string, p: Partial<Manufacturer>) => {
-    setManufacturers((prev) => prev.map((m) => (m.id === id ? { ...m, ...p } : m)));
-  }, []);
+  const updateManufacturer = useCallback(
+    (id: string, p: Partial<Manufacturer>) => {
+      setManufacturers((prev) =>
+        prev.map((m) => {
+          if (m.id !== id) return m;
+          const next = { ...m, ...p };
+          saveManufacturerDebounced(`/api/manufacturers/${id}`, next);
+          return next;
+        })
+      );
+    },
+    [saveManufacturerDebounced]
+  );
 
   const removeManufacturer = useCallback((id: string) => {
     setManufacturers((prev) => prev.filter((m) => m.id !== id));
+    apiSend("DELETE", `/api/manufacturers/${id}`);
   }, []);
 
   const active = useMemo(
@@ -666,6 +799,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     fileProduct,
     reopenProduct,
     patch,
+    patchProduct,
     uid,
     manufacturers,
     addManufacturer,
