@@ -10,3 +10,6 @@ npm-debug.log*
 .vercel
 *.tsbuildinfo
 next-env.d.ts.bak
+
+# Local database backups (never commit live data)
+/backups

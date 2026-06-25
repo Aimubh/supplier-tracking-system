@@ -14,7 +14,9 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "node --env-file=.env prisma/seed.mjs",
-    "db:seed:example": "node --env-file=.env prisma/seed-example.mjs"
+    "db:seed:example": "node --env-file=.env prisma/seed-example.mjs",
+    "db:backup": "node --env-file=.env prisma/backup.mjs",
+    "db:restore": "node --env-file=.env prisma/restore.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
