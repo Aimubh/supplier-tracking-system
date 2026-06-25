@@ -20,6 +20,7 @@ import {
   type SourcingAssumptions,
   type SourcingInputs,
 } from "./sourcing-model";
+import { EMPTY_MARKET_SIZE, type MarketSize } from "./market-size";
 
 // ---- Entity types -------------------------------------------------------------
 
@@ -316,6 +317,12 @@ export interface Expenses {
 export interface Sourcing {
   assumptions: SourcingAssumptions;
   inputs: SourcingInputs;
+  marketSize: MarketSize; // ecom market snapshot (fetched on demand)
+  // Provenance / confidence flags from the auto-fill (which fields were guessed).
+  sourceUrl: string; // the pasted reel/Alibaba link
+  supplierName: string; // top supplier from the scrape
+  hsnEstimated: boolean;
+  weightEstimated: boolean;
 }
 
 export interface Product {
@@ -504,6 +511,11 @@ export function blankProduct(name: string): Product {
     sourcing: {
       assumptions: { ...DEFAULT_ASSUMPTIONS },
       inputs: { ...DEFAULT_SOURCING_INPUTS },
+      marketSize: { ...EMPTY_MARKET_SIZE },
+      sourceUrl: "",
+      supplierName: "",
+      hsnEstimated: false,
+      weightEstimated: false,
     },
   };
 }
@@ -567,6 +579,11 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
   merged.sourcing = {
     assumptions: { ...base.sourcing.assumptions, ...(stored.sourcing?.assumptions ?? {}) },
     inputs: { ...base.sourcing.inputs, ...(stored.sourcing?.inputs ?? {}) },
+    marketSize: { ...base.sourcing.marketSize, ...(stored.sourcing?.marketSize ?? {}) },
+    sourceUrl: stored.sourcing?.sourceUrl ?? "",
+    supplierName: stored.sourcing?.supplierName ?? "",
+    hsnEstimated: stored.sourcing?.hsnEstimated ?? false,
+    weightEstimated: stored.sourcing?.weightEstimated ?? false,
   };
 
   // Ensure the docImages map exists, and migrate old string entries (one base64

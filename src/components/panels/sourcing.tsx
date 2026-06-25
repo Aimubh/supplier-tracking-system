@@ -1,11 +1,13 @@
 "use client";
 
-// Sourcing Model panel (Pre-Order). An in-app replica of the LAZERECOM workbook:
-// editable per-SKU inputs + assumptions on the left, and the live landed-cost
-// build-up, per-channel contribution, and GO / NO-GO decision on the right.
-// All figures are computed by src/lib/sourcing-model.ts (never stored).
+// Sourcing Model panel (Pre-Order). Paste an Instagram/Alibaba link → the Vendex
+// scraper finds the top supplier → SKU fields auto-fill (with HSN/weight guessed)
+// → the model computes landed cost, channel margins and a GO/NO-GO verdict. A
+// Market Size lookup scrapes Amazon.in for demand/competition and produces a
+// SELL / CAUTION / AVOID recommendation. All auto-filled fields stay editable.
 
 import { useState } from "react";
+import { Search, Sparkles, AlertTriangle, Loader2 } from "lucide-react";
 import { useStore, type Sourcing } from "@/lib/store";
 import {
   computeSourcing,
@@ -13,12 +15,12 @@ import {
   type SourcingAssumptions,
   type SourcingInputs,
 } from "@/lib/sourcing-model";
+import { recommend, type MarketSize } from "@/lib/market-size";
 import { Field, Text, Num, Stat, PanelHead } from "../fields";
 import { Seal, Chip } from "../seal";
 import { useDraft } from "../use-draft";
 import { SaveBar } from "../save-bar";
 
-// Display helpers — keep money reading like a ledger.
 const inr = (n: number) =>
   "₹" + (Number.isFinite(n) ? n : 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 const usd = (n: number) => "$" + (Number.isFinite(n) ? n : 0).toFixed(2);
@@ -31,27 +33,129 @@ export function SourcingPanel() {
     (active?.id ?? "") + ":sourcing"
   );
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [link, setLink] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [fetchMsg, setFetchMsg] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
+  const [marketLoading, setMarketLoading] = useState(false);
+
   if (!active) return null;
 
   const a = draft.assumptions;
   const i = draft.inputs;
   const result = computeSourcing(a, i);
+  const rec = recommend(draft.marketSize, result.bestContributionPct);
 
   const setInput = <K extends keyof SourcingInputs>(k: K, v: SourcingInputs[K]) =>
     setAll({ ...draft, inputs: { ...i, [k]: v } });
   const setAssume = <K extends keyof SourcingAssumptions>(k: K, v: SourcingAssumptions[K]) =>
     setAll({ ...draft, assumptions: { ...a, [k]: v } });
 
+  // ---- Auto-fill from a pasted link (calls the Vendex bridge) ----
+  async function autoFill() {
+    if (!/^https?:\/\//i.test(link)) {
+      setFetchMsg({ tone: "err", text: "Paste a valid http(s) link first." });
+      return;
+    }
+    setFetching(true);
+    setFetchMsg({ tone: "ok", text: "Scraping the top supplier… this can take up to ~2 min." });
+    try {
+      const res = await fetch("/api/sourcing/fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: link }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFetchMsg({ tone: "err", text: data.error ?? "Fetch failed." });
+        return;
+      }
+      // Merge the scraped inputs over the current ones; keep user-entered sells.
+      setAll({
+        ...draft,
+        inputs: { ...i, ...data.inputs },
+        sourceUrl: link,
+        supplierName: data.raw?.supplierName ?? "",
+        hsnEstimated: data.flags?.hsnEstimated ?? true,
+        weightEstimated: data.flags?.weightEstimated ?? true,
+      });
+      setFetchMsg(
+        data.lowConfidence
+          ? { tone: "warn", text: data.note || "Low-confidence scrape — verify the fields." }
+          : { tone: "ok", text: `Filled from “${data.raw?.supplierName || "supplier"}”. Verify HSN & weight (estimated).` }
+      );
+    } catch {
+      setFetchMsg({ tone: "err", text: "Could not reach the scraper service." });
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  // ---- Market size lookup ----
+  async function fetchMarket() {
+    const query = i.itemName || draft.supplierName;
+    if (!query) {
+      setFetchMsg({ tone: "err", text: "Add an item name first (or auto-fill)." });
+      return;
+    }
+    setMarketLoading(true);
+    try {
+      const res = await fetch("/api/sourcing/market-size", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const ms: MarketSize = await res.json();
+      setAll({ ...draft, marketSize: ms });
+    } catch {
+      // leave existing snapshot
+    } finally {
+      setMarketLoading(false);
+    }
+  }
+
   const verdictTone =
     result.verdict === "GO" ? "seal" : result.verdict === "NO_GO" ? "block" : "stamp";
   const verdictMark = result.verdict === "GO" ? "◉" : result.verdict === "NO_GO" ? "✕" : "●";
+  const recTone =
+    rec.verdict === "SELL" ? "seal" : rec.verdict === "AVOID" ? "block" : rec.verdict === "CAUTION" ? "stamp" : "neutral";
 
   return (
     <div>
       <PanelHead
         title="Sourcing model"
-        desc="Per-SKU landed cost and channel margins, costed backwards from the selling price. The verdict is GO when at least one channel clears the target margin."
+        desc="Paste a reel or Alibaba link to auto-fill the top supplier, then review the landed cost, channel margins and market size. The verdict is GO when a channel clears the target margin."
       />
+
+      {/* ---- Paste-link auto-fill bar ---- */}
+      <div className="sheet mb-5 rounded-sm p-4">
+        <p className="eyebrow mb-2">Auto-fill from a link</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://www.instagram.com/reel/…  or  https://www.alibaba.com/product-detail/…"
+            className="h-11 flex-1 rounded-sm border border-line bg-white px-3.5 text-[14px] text-ink placeholder:text-line-strong focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15"
+          />
+          <button
+            onClick={autoFill}
+            disabled={fetching}
+            className="flex h-11 items-center justify-center gap-2 rounded-sm bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-60"
+          >
+            {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {fetching ? "Scraping…" : "Fetch supplier"}
+          </button>
+        </div>
+        {fetchMsg && (
+          <p
+            className={`mt-2 flex items-center gap-1.5 text-[12.5px] ${
+              fetchMsg.tone === "err" ? "text-block" : fetchMsg.tone === "warn" ? "text-pending" : "text-muted"
+            }`}
+          >
+            {fetchMsg.tone === "warn" && <AlertTriangle className="h-3.5 w-3.5" />}
+            {fetchMsg.text}
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
         {/* ---- Left: SKU inputs ---- */}
@@ -68,13 +172,13 @@ export function SourcingPanel() {
               <Field label="Colour">
                 <Text value={i.colour} onChange={(v) => setInput("colour", v)} placeholder="black" />
               </Field>
-              <Field label="HSN code">
+              <Field label="HSN code" hint={draft.hsnEstimated ? "estimated — verify" : undefined}>
                 <Text value={i.hsnCode} onChange={(v) => setInput("hsnCode", v)} placeholder="3926" />
               </Field>
               <Field label="Size / dimension">
                 <Text value={i.size} onChange={(v) => setInput("size", v)} placeholder="84×530 mm" />
               </Field>
-              <Field label="Unit weight (g)">
+              <Field label="Unit weight (g)" hint={draft.weightEstimated ? "estimated — verify" : undefined}>
                 <Num value={i.unitWeightG} onChange={(v) => setInput("unitWeightG", v)} blankZero />
               </Field>
             </div>
@@ -96,29 +200,15 @@ export function SourcingPanel() {
                 <Num value={i.sellPriceAed} onChange={(v) => setInput("sellPriceAed", v)} blankZero />
               </Field>
               <Field label="Freight % override" hint="blank = use assumption">
-                <Num
-                  value={i.freightPctOverride ?? 0}
-                  onChange={(v) => setInput("freightPctOverride", v || null)}
-                  blankZero
-                  step="0.01"
-                />
+                <Num value={i.freightPctOverride ?? 0} onChange={(v) => setInput("freightPctOverride", v || null)} blankZero step="0.01" />
               </Field>
               <Field label="BCD % override" hint="blank = use assumption">
-                <Num
-                  value={i.bcdPctOverride ?? 0}
-                  onChange={(v) => setInput("bcdPctOverride", v || null)}
-                  blankZero
-                  step="0.01"
-                />
+                <Num value={i.bcdPctOverride ?? 0} onChange={(v) => setInput("bcdPctOverride", v || null)} blankZero step="0.01" />
               </Field>
             </div>
             <div className="mt-3">
               <Field label="Reference Amazon link">
-                <Text
-                  value={i.referenceAmazonLink}
-                  onChange={(v) => setInput("referenceAmazonLink", v)}
-                  placeholder="https://www.amazon.in/s?k=…"
-                />
+                <Text value={i.referenceAmazonLink} onChange={(v) => setInput("referenceAmazonLink", v)} placeholder="https://www.amazon.in/s?k=…" />
               </Field>
             </div>
           </section>
@@ -194,6 +284,57 @@ export function SourcingPanel() {
               ))}
             </div>
           </section>
+
+          {/* ---- Market size ---- */}
+          <section className="sheet rounded-sm p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="eyebrow">Market size · Amazon.in</span>
+              <button
+                onClick={fetchMarket}
+                disabled={marketLoading}
+                className="flex items-center gap-1.5 rounded-sm border border-line bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink disabled:opacity-60"
+              >
+                {marketLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                {marketLoading ? "Checking…" : "Check market"}
+              </button>
+            </div>
+
+            <div className="mb-3 flex items-baseline justify-between">
+              <Seal
+                label={rec.verdict}
+                tone={recTone}
+                mark={rec.verdict === "SELL" ? "◉" : rec.verdict === "AVOID" ? "✕" : "●"}
+                className="text-[18px] font-semibold"
+              />
+              {draft.marketSize.fetchedAt != null && (
+                <span className="figure text-[12px] text-muted">score {rec.score}/100</span>
+              )}
+            </div>
+
+            {draft.marketSize.fetchedAt == null ? (
+              <p className="text-[12.5px] text-muted">Run a market check to gauge demand and competition.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <Stat label="Listings" value={String(draft.marketSize.resultCount)} />
+                  <Stat label="Reviews" value={draft.marketSize.totalReviews.toLocaleString("en-IN")} />
+                  <Stat label="Avg ₹" value={draft.marketSize.avgPriceInr != null ? inr(draft.marketSize.avgPriceInr) : "—"} />
+                </div>
+                <ul className="mt-3 space-y-1">
+                  {rec.reasons.map((r, n) => (
+                    <li key={n} className="flex gap-1.5 text-[12px] text-muted">
+                      <span className="text-line-strong">·</span> {r}
+                    </li>
+                  ))}
+                </ul>
+                {draft.marketSize.note && (
+                  <p className="mt-2 flex items-center gap-1.5 text-[12px] text-pending">
+                    <AlertTriangle className="h-3.5 w-3.5" /> {draft.marketSize.note}
+                  </p>
+                )}
+              </>
+            )}
+          </section>
         </div>
       </div>
 
@@ -211,26 +352,14 @@ export function SourcingPanel() {
   );
 }
 
-function Row({
-  label,
-  value,
-  hint,
-  strong,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  strong?: boolean;
-}) {
+function Row({ label, value, hint, strong }: { label: string; value: string; hint?: string; strong?: boolean }) {
   return (
     <div className="flex items-center justify-between py-1">
       <span className={strong ? "text-[13px] font-semibold text-ink" : "text-[13px] text-muted"}>
         {label}
         {hint && <span className="figure ml-2 text-[11px] text-muted">{hint}</span>}
       </span>
-      <span className={`figure ${strong ? "text-[15px] font-semibold text-ink" : "text-[13px] text-body"}`}>
-        {value}
-      </span>
+      <span className={`figure ${strong ? "text-[15px] font-semibold text-ink" : "text-[13px] text-body"}`}>{value}</span>
     </div>
   );
 }
