@@ -14,10 +14,13 @@ import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 import { enrichScraped, type ScrapedProduct } from "@/lib/sourcing-enrich";
 
 export const dynamic = "force-dynamic";
+// Reel jobs (download → frame → Gemini → image search) can take ~60-120s. Allow
+// the route to run long enough to see them through.
+export const maxDuration = 180;
 
 const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
 const VENDEX_TOKEN = process.env.VENDEX_API_TOKEN ?? "";
-const POLL_TIMEOUT_MS = 120_000; // give the scraper up to 2 minutes
+const POLL_TIMEOUT_MS = 160_000; // reel pipeline can take ~2 min
 const POLL_EVERY_MS = 3_000;
 
 function authHeaders(): Record<string, string> {
@@ -45,27 +48,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Paste a valid http(s) link." }, { status: 400 });
   }
 
-  // 1) Submit the job.
+  // 0) If a job for this exact URL already completed, reuse it instantly — so
+  // clicking "Fetch" again after a slow reel picks up the finished result rather
+  // than kicking off another ~2-min scrape.
   let jobId = "";
   try {
-    const res = await fetch(`${VENDEX}/api/v1/process`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ reel_url: url }),
-    });
-    if (!res.ok) {
+    const r = await fetch(`${VENDEX}/api/v1/jobs?limit=20`, { headers: authHeaders() });
+    if (r.ok) {
+      const data = await r.json();
+      const jobs = Array.isArray(data) ? data : data.jobs ?? [];
+      const done = jobs.find(
+        (j: Record<string, unknown>) =>
+          j.status === "complete" &&
+          (j.reelUrl === url || j.reel_url === url) &&
+          Number(j.resultCount ?? j.result_count ?? 0) > 0
+      );
+      if (done) jobId = String(done.id ?? "");
+    }
+  } catch {
+    // ignore — fall through to submitting a fresh job
+  }
+
+  // 1) Submit a new job only if we didn't find a completed one.
+  if (!jobId) {
+    try {
+      const res = await fetch(`${VENDEX}/api/v1/process`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ reel_url: url }),
+      });
+      if (!res.ok) {
+        return NextResponse.json(
+          { error: `Vendex rejected the job (${res.status}). Is the scraper service running?` },
+          { status: 502 }
+        );
+      }
+      const data = await res.json();
+      jobId = String(data.job_id ?? "");
+    } catch {
       return NextResponse.json(
-        { error: `Vendex rejected the job (${res.status}). Is the scraper service running?` },
+        { error: "Could not reach the Vendex scraper service. Start it and try again." },
         { status: 502 }
       );
     }
-    const data = await res.json();
-    jobId = String(data.job_id ?? "");
-  } catch {
-    return NextResponse.json(
-      { error: "Could not reach the Vendex scraper service. Start it and try again." },
-      { status: 502 }
-    );
   }
   if (!jobId) {
     return NextResponse.json({ error: "Vendex did not return a job id." }, { status: 502 });
@@ -90,8 +115,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "The scrape failed (the source may have blocked it)." }, { status: 502 });
   }
   if (status !== "complete") {
+    // Reel jobs are slow; a timeout usually means it's STILL running, not blocked.
+    // Return the jobId so the client can retry/poll rather than implying failure.
     return NextResponse.json(
-      { error: "The scrape timed out — Alibaba likely blocked it. Try again or enter details manually." },
+      {
+        error:
+          "Still working on it — reels take ~1-2 min. It may finish shortly; click Fetch again in a moment to pick up the result.",
+        jobId,
+        stillRunning: true,
+      },
       { status: 504 }
     );
   }
