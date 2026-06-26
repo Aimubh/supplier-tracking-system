@@ -33,26 +33,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  // Optionally enrich from the image via Vendex/Gemini to get a cleaner product
-  // name + material when the text is sparse.
-  if (imageUrl && (!name || !material)) {
-    try {
-      const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
-      const token = process.env.VENDEX_API_TOKEN ?? "";
-      const r = await fetch(`${VENDEX}/api/v1/market-size`, {
-        method: "POST",
-        headers: token
-          ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-          : { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_url: imageUrl }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      // market-size doesn't give material; this is a best-effort hook only.
-      void r;
-    } catch {
-      /* best effort */
-    }
-  }
+  // (HSN matching runs on the product text directly — fast, offline, no API.)
+  void imageUrl;
 
   const text = `${name} ${description}`.trim();
   if (!text && !material) {

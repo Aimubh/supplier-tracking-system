@@ -94,6 +94,62 @@ export const HSN_TABLE: HsnEntry[] = [
     keywords: ["cable", "connector", "plug", "socket", "charger cable", "adapter"],
     materials: ["plastic", "copper", "metal"],
   },
+  {
+    hsn: "9608",
+    title: "Ball-point pens, markers, fountain pens",
+    bcdPct: 0.1, gstPct: 0.18,
+    keywords: ["pen", "ballpoint", "ball point", "marker", "fountain pen", "gel pen", "roller pen", "highlighter"],
+    materials: ["plastic", "metal"],
+  },
+  {
+    hsn: "9609",
+    title: "Pencils, crayons, chalks, pastels",
+    bcdPct: 0.1, gstPct: 0.12,
+    keywords: ["pencil", "crayon", "chalk", "pastel", "colour pencil", "charcoal"],
+    materials: ["wood", "plastic"],
+  },
+  {
+    hsn: "4820",
+    title: "Notebooks, diaries, registers, paper stationery",
+    bcdPct: 0.1, gstPct: 0.18,
+    keywords: ["notebook", "diary", "register", "notepad", "journal", "planner", "sketchbook"],
+    materials: ["paper"],
+  },
+  {
+    hsn: "8517",
+    title: "Phones & communication apparatus",
+    bcdPct: 0.2, gstPct: 0.18,
+    keywords: ["phone", "smartphone", "earbuds", "headphone", "earphone", "smartwatch", "router"],
+    materials: ["plastic", "metal", "electronic"],
+  },
+  {
+    hsn: "8504",
+    title: "Power banks, chargers, adapters (static converters)",
+    bcdPct: 0.2, gstPct: 0.18,
+    keywords: ["power bank", "powerbank", "charger", "adapter", "ups", "converter"],
+    materials: ["plastic", "lithium", "electronic"],
+  },
+  {
+    hsn: "7323",
+    title: "Table / kitchen / household articles of iron or steel",
+    bcdPct: 0.2, gstPct: 0.12,
+    keywords: ["steel bottle", "steel cup", "steel tumbler", "utensil", "flask", "steel container", "cookware"],
+    materials: ["steel", "stainless steel", "iron"],
+  },
+  {
+    hsn: "9617",
+    title: "Vacuum flasks / insulated bottles",
+    bcdPct: 0.2, gstPct: 0.18,
+    keywords: ["vacuum flask", "thermos", "insulated bottle", "insulated flask", "thermal bottle"],
+    materials: ["steel", "stainless steel"],
+  },
+  {
+    hsn: "6911",
+    title: "Tableware / kitchenware of porcelain or china",
+    bcdPct: 0.1, gstPct: 0.12,
+    keywords: ["ceramic mug", "porcelain", "china cup", "ceramic cup", "ceramic plate", "ceramic bowl"],
+    materials: ["ceramic", "porcelain", "china"],
+  },
 ];
 
 export interface HsnCandidate {
