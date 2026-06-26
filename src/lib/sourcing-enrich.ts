@@ -98,13 +98,63 @@ export function estimateWeight(text: string): { grams: number; estimated: boolea
   return { grams: hint ? hint.base : 0, estimated: true };
 }
 
-// Map a scraped product into partial Sourcing inputs + flags.
+// Read a value from the scraper's real product_properties (DataHub item
+// properties), matching any of the given key fragments case-insensitively.
+function propLookup(props: Record<string, unknown> | undefined, keys: string[]): string {
+  if (!props) return "";
+  const entries = Object.entries(props);
+  for (const k of keys) {
+    const hit = entries.find(([name]) => name.toLowerCase().includes(k.toLowerCase()));
+    if (hit && hit[1] != null && String(hit[1]).trim()) return String(hit[1]).trim();
+  }
+  return "";
+}
+
+// Parse a weight string like "7", "7 kg", "300 g", "0.3kg" → grams.
+function weightToGrams(raw: string): number {
+  const s = raw.toLowerCase().replace(/,/g, "");
+  const m = s.match(/([\d.]+)\s*(kg|g|gram|grams)?/);
+  if (!m) return 0;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return 0;
+  // If unit is grams use as-is; otherwise (kg or bare number) treat as kg→g when
+  // it has a kg hint, else assume the figure is already grams only for small <... ambiguous.
+  if (/g\b|gram/.test(s) && !/kg/.test(s)) return Math.round(n);
+  if (/kg/.test(s)) return Math.round(n * 1000);
+  // bare number: weight props on Alibaba are usually kg → convert
+  return Math.round(n * 1000);
+}
+
+// Map a scraped product into partial Sourcing inputs + flags. Prefers the real
+// structured properties from the scraper; falls back to parsing the title.
 export function enrichScraped(p: ScrapedProduct): EnrichedResult {
   const text = `${p.productName ?? ""} ${p.productDescription ?? ""}`;
-  const hsn = guessHsn(text);
-  const colour = parseColour(text);
-  const dim = parseDimension(text);
-  const weight = estimateWeight(text);
+  const props = p.productProperties;
+
+  // Colour: real property first, else parse from title.
+  const realColour = propLookup(props, ["color", "colour"]);
+  const colour = realColour || parseColour(text);
+
+  // Dimension: real "Single package size" / "dimensions" / "size", else parse.
+  const realDim = propLookup(props, ["single package size", "dimensions", "size", "product size"]);
+  const dim = realDim || parseDimension(text);
+
+  // Weight: real "weight (kg)" / "gross weight", else estimate from category.
+  const realWeightRaw = propLookup(props, ["gross weight", "weight (kg)", "weight(kg)", "weight", "net weight"]);
+  let weightG = 0;
+  let weightEstimated = true;
+  if (realWeightRaw) {
+    weightG = weightToGrams(realWeightRaw);
+    weightEstimated = false;
+  } else {
+    weightG = estimateWeight(text).grams;
+  }
+
+  // HSN still guessed (Alibaba never provides it). Use material prop if present
+  // to improve the guess.
+  const material = propLookup(props, ["material"]);
+  const hsn = guessHsn(`${text} ${material}`);
+
   // Prefer the lowest tier price as the FOB the model costs from.
   const fob = p.priceRangeMin && p.priceRangeMin > 0 ? p.priceRangeMin : p.unitPriceUSD ?? 0;
 
@@ -114,13 +164,13 @@ export function enrichScraped(p: ScrapedProduct): EnrichedResult {
       colour,
       hsnCode: hsn.hsn,
       size: dim,
-      unitWeightG: weight.grams,
+      unitWeightG: weightG,
       fobUsd: fob,
       orderQty: p.moq && p.moq > 0 ? p.moq : 0,
     },
     flags: {
       hsnEstimated: hsn.estimated,
-      weightEstimated: weight.estimated,
+      weightEstimated,
       colourParsed: colour !== "",
     },
   };
