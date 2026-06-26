@@ -7,7 +7,7 @@
 // SELL / CAUTION / AVOID recommendation. All auto-filled fields stay editable.
 
 import { useState } from "react";
-import { Search, Sparkles, AlertTriangle, Loader2, ExternalLink, Link as LinkIcon } from "lucide-react";
+import { Search, Sparkles, AlertTriangle, Loader2, ExternalLink, Link as LinkIcon, Image as ImageIcon } from "lucide-react";
 import { useStore, type Sourcing } from "@/lib/store";
 import {
   computeSourcing,
@@ -94,6 +94,43 @@ export function SourcingPanel() {
     }
   }
 
+  // ---- Auto-fill from an uploaded product image ----
+  async function autoFillFromImage(file: File) {
+    setFetching(true);
+    setFetchMsg({ tone: "ok", text: `Searching Alibaba by image “${file.name}”…` });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("label", i.itemName || "");
+      const res = await fetch("/api/sourcing/fetch-image", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setFetchMsg({ tone: "err", text: data.error ?? "Image search failed." });
+        return;
+      }
+      setAll({
+        ...draft,
+        inputs: { ...i, ...data.inputs },
+        sourceUrl: data.raw?.productImageUrl ?? "",
+        supplierName: data.raw?.supplierName ?? "",
+        supplierProductUrl: data.raw?.productUrl ?? "",
+        supplierCountry: data.raw?.country ?? "",
+        supplierImageUrl: data.raw?.productImageUrl ?? "",
+        supplierCount: data.supplierCount ?? 0,
+        hsnEstimated: data.flags?.hsnEstimated ?? true,
+        weightEstimated: data.flags?.weightEstimated ?? true,
+      });
+      setFetchMsg({
+        tone: "ok",
+        text: `Found ${data.supplierCount ?? 1} match(es) — filled from “${data.raw?.supplierName || "supplier"}”. Verify HSN & weight.`,
+      });
+    } catch {
+      setFetchMsg({ tone: "err", text: "Could not reach the scraper service." });
+    } finally {
+      setFetching(false);
+    }
+  }
+
   // ---- Market size lookup ----
   async function fetchMarket() {
     const query = i.itemName || draft.supplierName;
@@ -130,9 +167,9 @@ export function SourcingPanel() {
         desc="Paste a reel or Alibaba link to auto-fill the top supplier, then review the landed cost, channel margins and market size. The verdict is GO when a channel clears the target margin."
       />
 
-      {/* ---- Paste-link auto-fill bar ---- */}
+      {/* ---- Auto-fill bar: paste a link OR upload a product image ---- */}
       <div className="sheet mb-5 rounded-sm p-4">
-        <p className="eyebrow mb-2">Auto-fill from a link</p>
+        <p className="eyebrow mb-2">Auto-fill from a link or image</p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
             value={link}
@@ -146,9 +183,31 @@ export function SourcingPanel() {
             className="flex h-11 items-center justify-center gap-2 rounded-sm bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-60"
           >
             {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {fetching ? "Scraping…" : "Fetch supplier"}
+            {fetching ? "Working…" : "Fetch supplier"}
           </button>
+          <label
+            className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-sm border border-line bg-surface px-4 text-[13px] font-semibold text-ink ${
+              fetching ? "pointer-events-none opacity-60" : "hover:bg-surface-strong"
+            }`}
+          >
+            <ImageIcon className="h-4 w-4" />
+            Upload image
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={fetching}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) autoFillFromImage(f);
+                e.target.value = ""; // allow re-selecting the same file
+              }}
+            />
+          </label>
         </div>
+        <p className="mt-1.5 text-[11.5px] text-muted">
+          Tip: uploading a clear product photo is faster and more reliable than a reel.
+        </p>
         {fetchMsg && (
           <p
             className={`mt-2 flex items-center gap-1.5 text-[12.5px] ${
