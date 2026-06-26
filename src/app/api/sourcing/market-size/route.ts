@@ -64,13 +64,65 @@ export async function POST(req: Request) {
   if (denied) return denied;
 
   let query = "";
+  let imageUrl = "";
   try {
     const body = await req.json();
     query = String(body.query ?? "").trim();
+    imageUrl = String(body.imageUrl ?? "").trim();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-  if (!query) return NextResponse.json({ error: "A search query is required." }, { status: 400 });
+  if (!query && !imageUrl) {
+    return NextResponse.json({ error: "A query or product image is required." }, { status: 400 });
+  }
+
+  // 1) PRIMARY: Google Lens (via Vendex) using the product image — returns real
+  // price/rating/review data, far more reliable than scraping Amazon.
+  if (imageUrl) {
+    try {
+      const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
+      const token = process.env.VENDEX_API_TOKEN ?? "";
+      const lr = await fetch(`${VENDEX}/api/v1/market-size`, {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+          : { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_url: imageUrl, query }),
+        signal: AbortSignal.timeout(40_000),
+      });
+      if (lr.ok) {
+        const d = await lr.json();
+        if ((d.count ?? 0) > 0) {
+          const listings = (d.listings ?? []).map((l: Record<string, unknown>) => ({
+            source: String(l.source ?? "google_lens"),
+            title: String(l.title ?? ""),
+            priceInr: null, // Lens prices are USD; kept separate from INR aggregates
+            reviewCount: (l.reviews as number) ?? null,
+            rating: (l.rating as number) ?? null,
+            url: String(l.link ?? ""),
+          }));
+          const ms = aggregateMarket(query || "product", listings, !!d.partial, d.note || "Source: Google Lens.");
+          // Override price aggregates with Lens USD values (more reliable).
+          return NextResponse.json({
+            ...ms,
+            avgPriceInr: d.avg_price ?? ms.avgPriceInr,
+            avgRating: d.avg_rating ?? ms.avgRating,
+            totalReviews: d.total_reviews ?? ms.totalReviews,
+            resultCount: d.count ?? ms.resultCount,
+            note: (d.note ? d.note + " " : "") + "Prices shown are USD (Google Lens).",
+          });
+        }
+      }
+    } catch {
+      // Lens unavailable — fall through to the Amazon scrape.
+    }
+  }
+
+  if (!query) {
+    return NextResponse.json(
+      aggregateMarket("product", [], true, "No market data (Lens returned nothing; no query for fallback).")
+    );
+  }
 
   const searchUrl = `https://www.amazon.in/s?k=${encodeURIComponent(query)}`;
 

@@ -143,7 +143,9 @@ export function SourcingPanel() {
       const res = await fetch("/api/sourcing/market-size", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        // Prefer the product image (Google Lens → real price/reviews); query is
+        // the Amazon-scrape fallback.
+        body: JSON.stringify({ query, imageUrl: draft.supplierImageUrl || "" }),
       });
       const ms: MarketSize = await res.json();
       setAll({ ...draft, marketSize: ms });
