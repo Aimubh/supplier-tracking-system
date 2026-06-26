@@ -152,8 +152,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No suppliers found for that link." }, { status: 404 });
   }
 
-  // Top supplier = best matchScore (the Vendex API already ranks; take the first).
-  const top = suppliers[0];
+  // A direct Alibaba URL returns exactly the one product → use it as-is. For
+  // multi-result searches (reel/image), the first row is often an outlier
+  // (e.g. a bulk carton), so pick the median-priced representative instead.
+  const top = suppliers.length === 1 ? suppliers[0] : pickRepresentative(suppliers);
 
   // Detect the hollow placeholder row Vendex returns when a scrape is blocked.
   const looksEmpty =
@@ -179,6 +181,30 @@ export async function POST(req: Request) {
     },
     suppliers: mapSupplierList(suppliers),
   });
+}
+
+// Pick the best supplier to auto-fill, not just the first result (often an
+// outlier — e.g. a bulk carton). For a sourcing tool we want the CHEAPEST
+// realistic price, after discarding statistical outliers via the IQR rule.
+// Falls back to the first result if nothing is priced.
+function pickRepresentative(suppliers: ScrapedProduct[]): ScrapedProduct {
+  const priceOf = (s: ScrapedProduct) =>
+    (s as Record<string, unknown>).unitPriceUSD as number | undefined;
+  const priced = suppliers.filter((s) => {
+    const p = priceOf(s);
+    return typeof p === "number" && p > 0;
+  });
+  if (priced.length === 0) return suppliers[0];
+  if (priced.length <= 2) {
+    return priced.reduce((a, b) => (priceOf(b)! < priceOf(a)! ? b : a));
+  }
+  const prices = priced.map((s) => priceOf(s)!).sort((a, b) => a - b);
+  const q1 = prices[Math.floor(prices.length * 0.25)];
+  const q3 = prices[Math.floor(prices.length * 0.75)];
+  const upperFence = q3 + 1.5 * (q3 - q1);
+  const sane = priced.filter((s) => priceOf(s)! <= upperFence);
+  const pool = sane.length > 0 ? sane : priced;
+  return pool.reduce((a, b) => (priceOf(b)! < priceOf(a)! ? b : a));
 }
 
 // Compact, UI-friendly list of suppliers so the user can click through and
