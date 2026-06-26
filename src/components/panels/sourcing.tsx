@@ -152,10 +152,14 @@ export function SourcingPanel() {
         // the Amazon-scrape fallback.
         body: JSON.stringify({ query, imageUrl: draft.supplierImageUrl || "" }),
       });
+      if (!res.ok) {
+        setFetchMsg({ tone: "err", text: `Market check failed (HTTP ${res.status}).` });
+        return;
+      }
       const ms: MarketSize = await res.json();
       setAll({ ...draft, marketSize: ms });
     } catch {
-      // leave existing snapshot
+      setFetchMsg({ tone: "err", text: "Market check error — couldn't reach the service." });
     } finally {
       setMarketLoading(false);
     }
@@ -168,6 +172,7 @@ export function SourcingPanel() {
       return;
     }
     setHsnLoading(true);
+    setHsnCandidates(null);
     try {
       const res = await fetch("/api/sourcing/hsn", {
         method: "POST",
@@ -175,12 +180,19 @@ export function SourcingPanel() {
         body: JSON.stringify({
           name: i.itemName,
           description: `${i.variant} ${i.colour} ${i.size}`,
+          material: i.colour,
           imageUrl: draft.supplierImageUrl || "",
         }),
       });
+      if (!res.ok) {
+        setFetchMsg({ tone: "err", text: `HSN lookup failed (HTTP ${res.status}).` });
+        setHsnCandidates([]);
+        return;
+      }
       const data = await res.json();
-      setHsnCandidates(data.candidates ?? []);
-    } catch {
+      setHsnCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+    } catch (e) {
+      setFetchMsg({ tone: "err", text: "HSN lookup error — see console." });
       setHsnCandidates([]);
     } finally {
       setHsnLoading(false);
@@ -339,7 +351,7 @@ export function SourcingPanel() {
                 </button>
               </div>
               {hsnCandidates && hsnCandidates.length === 0 && (
-                <p className="mt-2 text-[12px] text-muted">No confident match — add material/use to the name and retry.</p>
+                <p className="mt-2 text-[12px] text-muted">No confident match — add the product&apos;s material/use to the name and retry.</p>
               )}
               {hsnCandidates && hsnCandidates.length > 0 && (
                 <div className="mt-2 space-y-1.5">
