@@ -112,7 +112,18 @@ export async function POST(req: Request) {
     }
   }
   if (status === "failed") {
-    return NextResponse.json({ error: "The scrape failed (the source may have blocked it)." }, { status: 502 });
+    let reason = "The scrape failed (the source may have blocked it).";
+    try {
+      const r = await fetch(`${VENDEX}/api/v1/jobs/${jobId}`, { headers: authHeaders() });
+      const j = await r.json();
+      const msg = String(j.errorMessage ?? j.error_message ?? "");
+      if (/quota|exceeded/i.test(msg)) {
+        reason = "Alibaba data API monthly quota is used up — upgrade the RapidAPI plan or wait for the reset.";
+      }
+    } catch {
+      /* keep generic */
+    }
+    return NextResponse.json({ error: reason }, { status: 502 });
   }
   if (status !== "complete") {
     // Reel jobs are slow; a timeout usually means it's STILL running, not blocked.
