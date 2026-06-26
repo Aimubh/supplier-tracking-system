@@ -358,8 +358,16 @@ export function SourcingPanel() {
                         <p className="truncate text-[11.5px] text-muted">{c.title}</p>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="figure text-[12.5px] text-ink">duty {pct(c.effectiveDutyPct)}</p>
-                        <p className="figure text-[11px] text-muted">GST {pct(c.gstPct)}</p>
+                        <p className="figure text-[13px] font-semibold text-ink">
+                          {result.cifInr > 0 ? inr(result.cifInr * c.effectiveDutyPct) : pct(c.effectiveDutyPct)}
+                          <span className="text-[10px] font-normal text-muted"> /pc duty</span>
+                        </p>
+                        <p className="figure text-[11px] text-muted">
+                          {result.cifInr > 0 && i.orderQty > 0
+                            ? `${inr(result.cifInr * c.effectiveDutyPct * i.orderQty)} total`
+                            : `duty ${pct(c.effectiveDutyPct)}`}
+                        </p>
+                        <p className="figure text-[10px] text-muted">{pct(c.effectiveDutyPct)} · GST {pct(c.gstPct)}</p>
                       </div>
                     </button>
                   ))}
