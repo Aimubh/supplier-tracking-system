@@ -146,11 +146,17 @@ export async function POST(req: Request) {
   const top = suppliers[0];
   const enriched = enrichScraped(top);
 
+  // Lens fallback gives RETAIL prices, not Alibaba wholesale FOB — warn so the
+  // FOB field isn't mistaken for a factory quote.
+  const isRetail = top.platform === "google_lens";
+
   return NextResponse.json({
     jobId,
     supplierCount: suppliers.length,
-    lowConfidence: false,
-    note: "",
+    lowConfidence: isRetail,
+    note: isRetail
+      ? "Shown from Google Lens (retail prices, not Alibaba wholesale FOB) — Alibaba data API quota is out. Treat FOB as approximate."
+      : "",
     inputs: enriched.inputs,
     flags: enriched.flags,
     raw: {

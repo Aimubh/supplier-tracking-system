@@ -18,6 +18,7 @@ export interface ScrapedProduct {
   moq?: number;
   productImageUrl?: string;
   productProperties?: Record<string, unknown>;
+  platform?: string; // "alibaba" (FOB) | "google_lens" (retail) — price-source hint
 }
 
 // Keyword → HSN map, aligned with the HSN codes used in the LAZERECOM workbook.
