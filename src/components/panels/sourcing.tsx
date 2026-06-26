@@ -399,7 +399,7 @@ export function SourcingPanel() {
           {/* ---- Market size ---- */}
           <section className="sheet rounded-sm p-5">
             <div className="mb-3 flex items-center justify-between">
-              <span className="eyebrow">Market size · Amazon.in</span>
+              <span className="eyebrow">Market size · India · UAE · USA</span>
               <button
                 onClick={fetchMarket}
                 disabled={marketLoading}
@@ -426,10 +426,35 @@ export function SourcingPanel() {
               <p className="text-[12.5px] text-muted">Run a market check to gauge demand and competition.</p>
             ) : (
               <>
+                {/* 3-market retail comparison */}
+                {draft.marketSize.comparison && (
+                  <div className="mb-3 overflow-hidden rounded-sm border border-rule">
+                    <div className="grid grid-cols-[64px_1fr_1fr] bg-surface text-[11px]">
+                      <span className="eyebrow px-2 py-1.5">Market</span>
+                      <span className="eyebrow px-2 py-1.5 text-right">Typical price</span>
+                      <span className="eyebrow px-2 py-1.5 text-right">In ₹</span>
+                    </div>
+                    {([
+                      ["India", draft.marketSize.comparison.india],
+                      ["UAE", draft.marketSize.comparison.uae],
+                      ["USA", draft.marketSize.comparison.usa],
+                    ] as const).map(([name, r]) => (
+                      <div key={name} className="grid grid-cols-[64px_1fr_1fr] border-t border-rule text-[12.5px]">
+                        <span className="px-2 py-1.5 font-semibold text-ink">{name}</span>
+                        <span className="figure px-2 py-1.5 text-right text-body">
+                          {r.avgPrice != null ? `${r.currency} ${r.avgPrice.toLocaleString("en-IN")}` : "—"}
+                        </span>
+                        <span className="figure px-2 py-1.5 text-right text-ink">
+                          {r.avgPriceInr != null ? inr(r.avgPriceInr) : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-2">
-                  <Stat label="Listings" value={String(draft.marketSize.resultCount)} />
-                  <Stat label="Reviews" value={draft.marketSize.totalReviews.toLocaleString("en-IN")} />
-                  <Stat label="Avg ₹" value={draft.marketSize.avgPriceInr != null ? inr(draft.marketSize.avgPriceInr) : "—"} />
+                  <Stat label="IN listings" value={String(draft.marketSize.resultCount)} />
+                  <Stat label="IN reviews" value={draft.marketSize.totalReviews.toLocaleString("en-IN")} />
+                  <Stat label="IN avg ₹" value={draft.marketSize.avgPriceInr != null ? inr(draft.marketSize.avgPriceInr) : "—"} />
                 </div>
                 <ul className="mt-3 space-y-1">
                   {rec.reasons.map((r, n) => (

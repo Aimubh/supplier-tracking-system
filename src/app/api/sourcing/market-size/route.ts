@@ -76,8 +76,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "A query or product image is required." }, { status: 400 });
   }
 
-  // 1) PRIMARY: Google Lens (via Vendex) using the product image — returns real
-  // price/rating/review data, far more reliable than scraping Amazon.
+  // 1) PRIMARY: Google Lens (via Vendex) — 3-market retail comparison
+  // (India / UAE / USA) from the product image. Real prices + reviews, localised.
   if (imageUrl) {
     try {
       const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
@@ -88,28 +88,37 @@ export async function POST(req: Request) {
           ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
           : { "Content-Type": "application/json" },
         body: JSON.stringify({ image_url: imageUrl, query }),
-        signal: AbortSignal.timeout(40_000),
+        signal: AbortSignal.timeout(60_000),
       });
       if (lr.ok) {
         const d = await lr.json();
-        if ((d.count ?? 0) > 0) {
-          const listings = (d.listings ?? []).map((l: Record<string, unknown>) => ({
-            source: String(l.source ?? "google_lens"),
-            title: String(l.title ?? ""),
-            priceInr: null, // Lens prices are USD; kept separate from INR aggregates
-            reviewCount: (l.reviews as number) ?? null,
-            rating: (l.rating as number) ?? null,
-            url: String(l.link ?? ""),
-          }));
-          const ms = aggregateMarket(query || "product", listings, !!d.partial, d.note || "Source: Google Lens.");
-          // Override price aggregates with Lens USD values (more reliable).
+        const mk = d.markets ?? {};
+        const region = (r: Record<string, unknown> = {}) => ({
+          currency: String(r.currency ?? ""),
+          currencyCode: String(r.currency_code ?? ""),
+          avgPrice: (r.avg_price as number) ?? null,
+          avgPriceInr: (r.avg_price_inr as number) ?? null,
+          minPrice: (r.min_price as number) ?? null,
+          maxPrice: (r.max_price as number) ?? null,
+          count: (r.count as number) ?? 0,
+          totalReviews: (r.total_reviews as number) ?? 0,
+          avgRating: (r.avg_rating as number) ?? null,
+        });
+        const india = region(mk.india);
+        const uae = region(mk.uae);
+        const usa = region(mk.usa);
+        const totalCount = india.count + uae.count + usa.count;
+        if (totalCount > 0) {
+          // India is the home market — drive the existing aggregates/recommendation off it.
+          const ms = aggregateMarket(query || "product", [], false, "Source: Google Lens (3-market retail).");
           return NextResponse.json({
             ...ms,
-            avgPriceInr: d.avg_price ?? ms.avgPriceInr,
-            avgRating: d.avg_rating ?? ms.avgRating,
-            totalReviews: d.total_reviews ?? ms.totalReviews,
-            resultCount: d.count ?? ms.resultCount,
-            note: (d.note ? d.note + " " : "") + "Prices shown are USD (Google Lens).",
+            resultCount: india.count,
+            avgPriceInr: india.avgPriceInr,
+            totalReviews: india.totalReviews,
+            avgRating: india.avgRating,
+            note: "Retail prices via Google Lens, per market (India / UAE / USA).",
+            comparison: { india, uae, usa, fetchedAt: Date.now() },
           });
         }
       }

@@ -17,6 +17,26 @@ export interface MarketListing {
   url: string;
 }
 
+// Per-market retail snapshot (India / UAE / USA) from Google Lens.
+export interface MarketRegion {
+  currency: string; // ₹ / AED / $
+  currencyCode: string; // INR / AED / USD
+  avgPrice: number | null; // typical (median) retail price, native currency
+  avgPriceInr: number | null; // same, converted to INR for comparison
+  minPrice: number | null;
+  maxPrice: number | null;
+  count: number;
+  totalReviews: number;
+  avgRating: number | null;
+}
+
+export interface MarketComparison {
+  india: MarketRegion;
+  uae: MarketRegion;
+  usa: MarketRegion;
+  fetchedAt: number | null;
+}
+
 // The aggregated market snapshot stored per product.
 export interface MarketSize {
   fetchedAt: number | null; // epoch ms, null if never run
@@ -30,6 +50,7 @@ export interface MarketSize {
   avgRating: number | null;
   partial: boolean; // true if the scrape was incomplete / blocked
   note: string; // human note about scrape quality
+  comparison?: MarketComparison; // 3-market retail comparison (India/UAE/USA)
 }
 
 export const EMPTY_MARKET_SIZE: MarketSize = {
