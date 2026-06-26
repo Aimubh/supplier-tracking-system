@@ -16,6 +16,7 @@ import {
   type SourcingInputs,
 } from "@/lib/sourcing-model";
 import { recommend, type MarketSize } from "@/lib/market-size";
+import type { HsnCandidate } from "@/lib/hsn-advisor";
 import { Field, Text, Num, Stat, PanelHead } from "../fields";
 import { Seal, Chip } from "../seal";
 import { useDraft } from "../use-draft";
@@ -37,6 +38,8 @@ export function SourcingPanel() {
   const [fetching, setFetching] = useState(false);
   const [fetchMsg, setFetchMsg] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
   const [marketLoading, setMarketLoading] = useState(false);
+  const [hsnLoading, setHsnLoading] = useState(false);
+  const [hsnCandidates, setHsnCandidates] = useState<HsnCandidate[] | null>(null);
 
   if (!active) return null;
 
@@ -153,6 +156,32 @@ export function SourcingPanel() {
       // leave existing snapshot
     } finally {
       setMarketLoading(false);
+    }
+  }
+
+  // ---- HSN advisor: suggest top-3 codes for the current product ----
+  async function suggestHsnCodes() {
+    if (!i.itemName && !i.variant) {
+      setFetchMsg({ tone: "err", text: "Add an item name first, then suggest HSN." });
+      return;
+    }
+    setHsnLoading(true);
+    try {
+      const res = await fetch("/api/sourcing/hsn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: i.itemName,
+          description: `${i.variant} ${i.colour} ${i.size}`,
+          imageUrl: draft.supplierImageUrl || "",
+        }),
+      });
+      const data = await res.json();
+      setHsnCandidates(data.candidates ?? []);
+    } catch {
+      setHsnCandidates([]);
+    } finally {
+      setHsnLoading(false);
     }
   }
 
@@ -292,6 +321,54 @@ export function SourcingPanel() {
               <Field label="Unit weight (g)" hint={draft.weightEstimated ? "estimated — verify" : undefined}>
                 <Num value={i.unitWeightG} onChange={(v) => setInput("unitWeightG", v)} blankZero />
               </Field>
+            </div>
+
+            {/* HSN advisor — suggest the best-fit codes with their duty */}
+            <div className="mt-3 border-t border-rule pt-3">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow">HSN advisor</span>
+                <button
+                  onClick={suggestHsnCodes}
+                  disabled={hsnLoading}
+                  className="flex items-center gap-1.5 rounded-sm border border-line bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink disabled:opacity-60"
+                >
+                  {hsnLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {hsnLoading ? "Finding…" : "Suggest HSN"}
+                </button>
+              </div>
+              {hsnCandidates && hsnCandidates.length === 0 && (
+                <p className="mt-2 text-[12px] text-muted">No confident match — add material/use to the name and retry.</p>
+              )}
+              {hsnCandidates && hsnCandidates.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {hsnCandidates.map((c, n) => (
+                    <button
+                      key={c.hsn}
+                      onClick={() => setInput("hsnCode", c.hsn)}
+                      className={`flex w-full items-start justify-between gap-3 rounded-sm border px-3 py-2 text-left transition hover:bg-surface ${
+                        i.hsnCode === c.hsn ? "border-ink bg-surface" : "border-line"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+                          <span className="figure">{c.hsn}</span>
+                          {n === 0 && <Chip label="BEST FIT" tone="seal" />}
+                          {c.isLowestDuty && <Chip label="LOWEST DUTY" tone="stamp" />}
+                        </p>
+                        <p className="truncate text-[11.5px] text-muted">{c.title}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="figure text-[12.5px] text-ink">duty {pct(c.effectiveDutyPct)}</p>
+                        <p className="figure text-[11px] text-muted">GST {pct(c.gstPct)}</p>
+                      </div>
+                    </button>
+                  ))}
+                  <p className="flex items-start gap-1.5 text-[11px] text-pending">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                    Advisory — confirm the correct code on ICEGATE / with your CHA before ordering.
+                  </p>
+                </div>
+              )}
             </div>
           </section>
 
