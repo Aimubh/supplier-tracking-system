@@ -177,5 +177,26 @@ export async function POST(req: Request) {
       productUrl: (top as Record<string, unknown>).productUrl ?? "",
       productImageUrl: top.productImageUrl ?? "",
     },
+    suppliers: mapSupplierList(suppliers),
+  });
+}
+
+// Compact, UI-friendly list of suppliers so the user can click through and
+// verify each result themselves.
+function mapSupplierList(suppliers: ScrapedProduct[]) {
+  return suppliers.slice(0, 20).map((s) => {
+    const r = s as Record<string, unknown>;
+    return {
+      name: String(r.supplierName ?? "Supplier"),
+      title: String(r.productName ?? ""),
+      priceUsd: (r.unitPriceUSD as number) ?? null,
+      priceInr: (r.unitPriceINR as number) ?? null,
+      reviews: (r.reviewCount as number) ?? null,
+      rating: (r.rating as number) ?? null,
+      country: String(r.country ?? ""),
+      url: String(r.productUrl ?? ""),
+      image: String(r.productImageUrl ?? ""),
+      platform: String(r.platform ?? ""),
+    };
   });
 }

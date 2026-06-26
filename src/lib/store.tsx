@@ -314,9 +314,25 @@ export interface Expenses {
 // Per-SKU sourcing & margin model (Pre-Order). Mirrors the LAZERECOM workbook:
 // editable assumptions + per-SKU inputs; the verdict/landed cost are computed by
 // src/lib/sourcing-model.ts and never stored (always derived from these).
+// A supplier returned by the scrape/search — kept so the user can click through
+// and verify each result themselves.
+export interface SourcingSupplier {
+  name: string;
+  title: string;
+  priceUsd: number | null;
+  priceInr: number | null;
+  reviews: number | null;
+  rating: number | null;
+  country: string;
+  url: string;
+  image: string;
+  platform: string; // "alibaba" (FOB) | "google_lens" (retail)
+}
+
 export interface Sourcing {
   assumptions: SourcingAssumptions;
   inputs: SourcingInputs;
+  suppliers: SourcingSupplier[]; // all results from the last fetch (for verification)
   marketSize: MarketSize; // ecom market snapshot (fetched on demand)
   // Provenance / confidence flags from the auto-fill (which fields were guessed).
   sourceUrl: string; // the pasted reel/Alibaba link
@@ -515,6 +531,7 @@ export function blankProduct(name: string): Product {
     sourcing: {
       assumptions: { ...DEFAULT_ASSUMPTIONS },
       inputs: { ...DEFAULT_SOURCING_INPUTS },
+      suppliers: [],
       marketSize: { ...EMPTY_MARKET_SIZE },
       sourceUrl: "",
       supplierName: "",
@@ -587,6 +604,7 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
   merged.sourcing = {
     assumptions: { ...base.sourcing.assumptions, ...(stored.sourcing?.assumptions ?? {}) },
     inputs: { ...base.sourcing.inputs, ...(stored.sourcing?.inputs ?? {}) },
+    suppliers: Array.isArray(stored.sourcing?.suppliers) ? stored.sourcing.suppliers : [],
     marketSize: { ...base.sourcing.marketSize, ...(stored.sourcing?.marketSize ?? {}) },
     sourceUrl: stored.sourcing?.sourceUrl ?? "",
     supplierName: stored.sourcing?.supplierName ?? "",

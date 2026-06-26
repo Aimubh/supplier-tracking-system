@@ -76,6 +76,7 @@ export function SourcingPanel() {
       setAll({
         ...draft,
         inputs: { ...i, ...data.inputs },
+        suppliers: data.suppliers ?? [],
         sourceUrl: link,
         supplierName: data.raw?.supplierName ?? "",
         supplierProductUrl: data.raw?.productUrl ?? "",
@@ -114,6 +115,7 @@ export function SourcingPanel() {
       setAll({
         ...draft,
         inputs: { ...i, ...data.inputs },
+        suppliers: data.suppliers ?? [],
         sourceUrl: data.raw?.productImageUrl ?? "",
         supplierName: data.raw?.supplierName ?? "",
         supplierProductUrl: data.raw?.productUrl ?? "",
@@ -558,6 +560,73 @@ export function SourcingPanel() {
           </section>
         </div>
       </div>
+
+      {/* ---- Suppliers found — click through to verify each result yourself ---- */}
+      {draft.suppliers && draft.suppliers.length > 0 && (
+        <section className="sheet mt-5 rounded-sm p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="eyebrow">Suppliers found · verify the links</span>
+            <span className="figure text-[12px] text-muted">{draft.suppliers.length} results</span>
+          </div>
+          <div className="overflow-hidden rounded-sm border border-rule">
+            <div className="grid grid-cols-[40px_1fr_110px_90px_72px] bg-surface text-[11px]">
+              <span className="eyebrow px-2 py-1.5" />
+              <span className="eyebrow px-2 py-1.5">Product · seller</span>
+              <span className="eyebrow px-2 py-1.5 text-right">Price</span>
+              <span className="eyebrow px-2 py-1.5 text-right">Reviews</span>
+              <span className="eyebrow px-2 py-1.5 text-right">Link</span>
+            </div>
+            {draft.suppliers.map((s, n) => (
+              <div
+                key={n}
+                className="grid grid-cols-[40px_1fr_110px_90px_72px] items-center border-t border-rule text-[12.5px]"
+              >
+                <div className="px-2 py-1.5">
+                  {s.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={s.image} alt="" className="h-7 w-7 rounded-sm border border-line object-cover" />
+                  ) : (
+                    <div className="h-7 w-7 rounded-sm border border-line bg-surface" />
+                  )}
+                </div>
+                <div className="min-w-0 px-2 py-1.5">
+                  <p className="truncate text-ink">{s.title || "Product"}</p>
+                  <p className="truncate text-[11px] text-muted">
+                    {s.name}
+                    {s.country ? ` · ${s.country}` : ""}
+                    {s.platform === "google_lens" ? " · retail" : ""}
+                  </p>
+                </div>
+                <div className="px-2 py-1.5 text-right">
+                  <span className="figure text-ink">
+                    {s.priceUsd ? usd(s.priceUsd) : s.priceInr ? inr(s.priceInr) : "—"}
+                  </span>
+                </div>
+                <div className="figure px-2 py-1.5 text-right text-muted">
+                  {s.reviews ? s.reviews.toLocaleString("en-IN") : "—"}
+                </div>
+                <div className="px-2 py-1.5 text-right">
+                  {s.url ? (
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[12px] text-link hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" /> open
+                    </a>
+                  ) : (
+                    <span className="text-muted">—</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-muted">
+            Open each link to confirm the product matches and the price is right before you counter the supplier.
+          </p>
+        </section>
+      )}
 
       <SaveBar
         dirty={dirty}
