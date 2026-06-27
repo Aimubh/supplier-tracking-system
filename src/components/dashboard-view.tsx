@@ -86,6 +86,26 @@ export function DashboardView() {
   const { products, active, setActiveId, reopenProduct } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
+  const [tgSending, setTgSending] = useState(false);
+  const [tgMsg, setTgMsg] = useState<string | null>(null);
+
+  async function sendTelegramReminders() {
+    setTgSending(true);
+    setTgMsg(null);
+    try {
+      const res = await fetch("/api/reminders/send", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setTgMsg(data.error ?? "Failed to send.");
+      } else {
+        setTgMsg(data.sent > 0 ? `Sent ${data.sent} reminder(s) to Telegram.` : "No reminders due today.");
+      }
+    } catch {
+      setTgMsg("Could not reach the server.");
+    } finally {
+      setTgSending(false);
+    }
+  }
   // Filters for the product list.
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
@@ -152,8 +172,22 @@ export function DashboardView() {
 
   return (
     <main className="px-7 py-6">
-      {reminders.length > 0 && (
+      {(reminders.length > 0 || tgMsg) && (
         <div className="mb-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">Production reminders</p>
+            <div className="flex items-center gap-2">
+              {tgMsg && <span className="text-[12px] text-muted">{tgMsg}</span>}
+              <button
+                onClick={sendTelegramReminders}
+                disabled={tgSending}
+                className="flex items-center gap-1.5 rounded-sm border border-line bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink hover:bg-surface-strong disabled:opacity-60"
+              >
+                <Bell className="h-3.5 w-3.5" />
+                {tgSending ? "Sending…" : "Send to Telegram"}
+              </button>
+            </div>
+          </div>
           {reminders.map((r) => (
             <button
               key={r.productId}
