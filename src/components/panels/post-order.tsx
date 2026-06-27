@@ -3,6 +3,8 @@
 import clsx from "clsx";
 import { Check, Lock } from "lucide-react";
 import { useStore, type Logistics, type MediaItem } from "@/lib/store";
+import { NOTIFY_OPTIONS } from "@/lib/production-reminder";
+import { EtaCountdown } from "../eta-countdown";
 import { Field, Text, Num, Toggle, Stat, PanelHead } from "../fields";
 import { DocRow } from "../doc-row";
 import { useDraft } from "../use-draft";
@@ -207,7 +209,46 @@ export function CustomClearancePanel() {
         <Field label="ETD (departure)"><Text value={l.etd} onChange={(v) => setField("etd", v)} placeholder="2026-07-01" /></Field>
         <Field label="ETA (arrival)"><Text value={l.eta} onChange={(v) => setField("eta", v)} placeholder="2026-07-22" /></Field>
       </div>
+
+      {/* Live countdown board to the ETA (ship reaching port) */}
+      <EtaCountdown eta={l.eta} arrived={l.arrived} />
+
       <div className="mt-4"><Toggle on={l.arrived} onChange={(v) => setField("arrived", v)} label="Vessel arrived & unloaded at port" /></div>
+
+      {/* ETA arrival reminders — alert the team before the ship reaches port */}
+      <div className="mt-5">
+        <p className="eyebrow mb-2">Notify me before the ship reaches port (ETA)</p>
+        <div className="flex flex-wrap gap-2">
+          {NOTIFY_OPTIONS.map((opt) => {
+            const on = l.notifyEtaDaysBefore.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  const set = new Set(l.notifyEtaDaysBefore);
+                  if (on) set.delete(opt.value);
+                  else set.add(opt.value);
+                  setField("notifyEtaDaysBefore", Array.from(set).sort((a, b) => b - a));
+                }}
+                className={clsx(
+                  "rounded-full border px-3 py-1.5 text-[12.5px] font-medium transition",
+                  on
+                    ? "border-ink bg-ink text-white"
+                    : "border-line bg-surface text-body hover:border-line-strong"
+                )}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {l.notifyEtaDaysBefore.length > 0 && (
+          <p className="mt-2 text-[12px] text-muted">
+            You&apos;ll get a Dashboard + Telegram reminder as the ETA approaches. Reminders stop once you mark the vessel arrived.
+          </p>
+        )}
+      </div>
 
       {/* Customs clearance */}
       <SubHead title="Customs clearance (India)" hint="After arrival: appoint a CHA, file the Bill of Entry against the IGM, pay duty + IGST, clear examination, and get Out of Charge." />

@@ -188,6 +188,9 @@ export interface Logistics {
   etd: string;
   eta: string;
   arrived: boolean;
+  // Reminder lead times before the ETA (vessel arrival at port), in days.
+  // 0 = "every day until arrival". e.g. [3, 1] = remind 3 days before AND 1 day before.
+  notifyEtaDaysBefore: number[];
   // customs clearance (India)
   chaName: string;
   chaNumber: string; // CHA phone
@@ -450,6 +453,7 @@ export function blankProduct(name: string): Product {
       etd: "",
       eta: "",
       arrived: false,
+      notifyEtaDaysBefore: [],
       chaName: "",
       chaNumber: "",
       chaContact: "",
@@ -623,6 +627,9 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
   // Ensure the docImages map exists, and migrate old string entries (one base64
   // image per doc) into MediaItem arrays so several files per doc are supported.
   merged.logistics.docImages = normalizeDocImages(merged.logistics.docImages);
+  merged.logistics.notifyEtaDaysBefore = Array.isArray(merged.logistics.notifyEtaDaysBefore)
+    ? merged.logistics.notifyEtaDaysBefore
+    : [];
   // Arrays default to empty if missing.
   merged.market = Array.isArray(stored.market) ? stored.market : base.market;
   merged.payments = Array.isArray(stored.payments) ? stored.payments : base.payments;

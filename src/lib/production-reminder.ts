@@ -23,6 +23,7 @@ export interface ProductionReminder {
   daysLeft: number; // whole days from today to the ready date (can be negative)
   tone: "stamp" | "block" | "seal"; // ochre upcoming / red overdue / green on-time
   message: string;
+  kind: "production" | "eta"; // production-ready vs ship arrival at port
 }
 
 // Whole days between today (local midnight) and an ISO date string.
@@ -72,14 +73,58 @@ export function reminderForProduct(p: Product): ProductionReminder | null {
     daysLeft: left,
     tone,
     message,
+    kind: "production",
   };
 }
 
-// All active reminders across the catalogue, soonest first.
+// Should this product show a ship-arrival (ETA) reminder today? Fires against
+// the logistics ETA date and stops once the vessel is marked arrived.
+export function etaReminderForProduct(p: Product): ProductionReminder | null {
+  const l = p.logistics;
+  if (!l || l.arrived) return null;
+  const lead = Array.isArray(l.notifyEtaDaysBefore) ? l.notifyEtaDaysBefore : [];
+  if (lead.length === 0) return null;
+  const left = daysUntil(l.eta);
+  if (left === null) return null;
+
+  const everyDay = lead.includes(0);
+  const matchesLead = lead.some((d) => d > 0 && left === d);
+  const inEveryDayWindow = everyDay && left >= 0;
+  const overdue = left < 0;
+  if (!matchesLead && !inEveryDayWindow && !overdue) return null;
+
+  let tone: ProductionReminder["tone"] = "stamp";
+  let message: string;
+  if (overdue) {
+    tone = "block";
+    message = `ETA passed ${Math.abs(left)} day${Math.abs(left) === 1 ? "" : "s"} ago — vessel not yet marked arrived.`;
+  } else if (left === 0) {
+    tone = "block";
+    message = "Ship reaches port today.";
+  } else {
+    message = `Ship reaches port in ${left} day${left === 1 ? "" : "s"}.`;
+  }
+
+  return {
+    productId: p.id,
+    productName: p.name,
+    readyDate: l.eta,
+    daysLeft: left,
+    tone,
+    message,
+    kind: "eta",
+  };
+}
+
+// All active reminders across the catalogue (production + ETA), soonest first.
 export function activeReminders(products: Product[]): ProductionReminder[] {
-  return products
-    .filter((p) => !p.filed)
-    .map(reminderForProduct)
-    .filter((r): r is ProductionReminder => r !== null)
-    .sort((a, b) => a.daysLeft - b.daysLeft);
+  const live = products.filter((p) => !p.filed);
+  const reminders: ProductionReminder[] = [];
+  for (const p of live) {
+    const prod = reminderForProduct(p);
+    if (prod) reminders.push(prod);
+    const eta = etaReminderForProduct(p);
+    if (eta) reminders.push(eta);
+  }
+  return reminders.sort((a, b) => a.daysLeft - b.daysLeft);
 }

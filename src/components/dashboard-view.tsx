@@ -175,7 +175,7 @@ export function DashboardView() {
       {(reminders.length > 0 || tgMsg) && (
         <div className="mb-5 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="eyebrow">Production reminders</p>
+            <p className="eyebrow">Reminders</p>
             <div className="flex items-center gap-2">
               {tgMsg && <span className="text-[12px] text-muted">{tgMsg}</span>}
               <button
@@ -188,9 +188,11 @@ export function DashboardView() {
               </button>
             </div>
           </div>
-          {reminders.map((r) => (
+          {reminders.map((r) => {
+            const Icon = r.kind === "eta" ? Ship : Bell;
+            return (
             <button
-              key={r.productId}
+              key={`${r.kind}:${r.productId}`}
               onClick={() => setActiveId(r.productId)}
               className={clsx(
                 "flex w-full items-center gap-3 rounded-md border px-4 py-2.5 text-left transition",
@@ -199,14 +201,17 @@ export function DashboardView() {
                   : "border-pending/30 bg-pending/5 hover:bg-pending/10"
               )}
             >
-              <Bell className={clsx("h-4 w-4 shrink-0", r.tone === "block" ? "text-block" : "text-pending")} />
+              <Icon className={clsx("h-4 w-4 shrink-0", r.tone === "block" ? "text-block" : "text-pending")} />
               <span className="text-[13px] font-semibold text-ink">{r.productName}</span>
               <span className={clsx("text-[12.5px]", r.tone === "block" ? "text-block" : "text-muted")}>
                 {r.message}
               </span>
-              <span className="figure ml-auto text-[11px] text-muted">ready {r.readyDate}</span>
+              <span className="figure ml-auto text-[11px] text-muted">
+                {r.kind === "eta" ? "ETA" : "ready"} {r.readyDate}
+              </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
       <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
