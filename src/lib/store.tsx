@@ -79,6 +79,9 @@ export interface Working {
   orderProcessing: boolean;
   productionStart: string; // ISO date
   productionReady: string; // ISO target date (countdown)
+  // Reminder lead times before productionReady (in days). 0 = "every day until".
+  // e.g. [3, 1] = remind 3 days before AND 1 day before.
+  notifyDaysBefore: number[];
   dispatched: boolean;
 }
 
@@ -511,6 +514,7 @@ export function blankProduct(name: string): Product {
       orderProcessing: false,
       productionStart: "",
       productionReady: "",
+      notifyDaysBefore: [],
       dispatched: false,
     },
     expenses: {
@@ -633,6 +637,9 @@ function migrateProduct(stored: Partial<Product> | undefined): Product {
     : [];
   merged.working.packagingMedia = Array.isArray(merged.working.packagingMedia)
     ? merged.working.packagingMedia
+    : [];
+  merged.working.notifyDaysBefore = Array.isArray(merged.working.notifyDaysBefore)
+    ? merged.working.notifyDaysBefore
     : [];
   // Older records used a boolean packagingDone; map it to the result enum.
   if (!merged.working.packagingResult) {

@@ -1,7 +1,9 @@
 "use client";
 
+import clsx from "clsx";
 import { Check, X, Truck, PackageCheck } from "lucide-react";
 import { useStore, type Working, type CurrencyCode } from "@/lib/store";
+import { NOTIFY_OPTIONS } from "@/lib/production-reminder";
 import { Field, Text, Num, Select, Toggle, Stat, PanelHead } from "../fields";
 import { MediaUpload } from "../media-upload";
 import { CurrencyConverter } from "../currency-converter";
@@ -414,6 +416,41 @@ export function DesignProcessingPanel() {
       <div className="mt-5">
         <p className="eyebrow mb-2">Production time</p>
         <Countdown target={w.productionReady} />
+      </div>
+
+      {/* Reminder lead times before the production-ready date */}
+      <div className="mt-5">
+        <p className="eyebrow mb-2">Notify me before the ready date</p>
+        <div className="flex flex-wrap gap-2">
+          {NOTIFY_OPTIONS.map((opt) => {
+            const on = w.notifyDaysBefore.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  const set = new Set(w.notifyDaysBefore);
+                  if (on) set.delete(opt.value);
+                  else set.add(opt.value);
+                  setField("notifyDaysBefore", Array.from(set).sort((a, b) => b - a));
+                }}
+                className={clsx(
+                  "rounded-full border px-3 py-1.5 text-[12.5px] font-medium transition",
+                  on
+                    ? "border-ink bg-ink text-white"
+                    : "border-line bg-surface text-body hover:border-line-strong"
+                )}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {w.notifyDaysBefore.length > 0 && (
+          <p className="mt-2 text-[12px] text-muted">
+            You&apos;ll see an in-app reminder on the Dashboard when the product enters the chosen window.
+          </p>
+        )}
       </div>
 
       <SaveBar dirty={dirty} saved={saved} onSave={() => { patch("working", draft); flashSaved(); }} onDiscard={discard} tab="on-working" />
