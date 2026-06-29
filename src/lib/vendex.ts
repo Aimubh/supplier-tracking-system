@@ -45,21 +45,98 @@ function mockForced(): boolean {
   return process.env.BOT_MOCK_SUPPLIERS === "1";
 }
 
-// Upload bytes to catbox.moe (public, no key) → public image URL Alibaba can fetch.
+// Host the image on a PUBLIC URL so SerpAPI/Alibaba can fetch it. Free no-auth
+// hosts (catbox/tmpfiles) throttle and reject server-IP uploads, so the PRIMARY
+// host is ImgBB (free API key, reliable); the free hosts are kept as fallback.
+const IMGBB_KEY = process.env.IMGBB_KEY ?? "";
+
+function blobOf(bytes: Uint8Array, mime: string): Blob {
+  return new Blob([bytes as BlobPart], { type: mime });
+}
+
+// Base64-encode bytes (no data: prefix) for ImgBB.
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return Buffer.from(binary, "binary").toString("base64");
+}
+
+// ImgBB — reliable image host (free API key). Returns a direct i.ibb.co URL.
+async function uploadImgbb(bytes: Uint8Array): Promise<string | null> {
+  if (!IMGBB_KEY) return null;
+  try {
+    const form = new FormData();
+    form.append("image", toBase64(bytes));
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(IMGBB_KEY)}`, {
+      method: "POST", body: form, signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const url: string | undefined = data?.data?.url ?? data?.data?.display_url;
+    return typeof url === "string" && /^https?:\/\//i.test(url) ? url : null;
+  } catch { return null; }
+}
+
+// litterbox.catbox.moe — catbox's temporary host (1h). More reliable for server
+// uploads than the main catbox endpoint.
+async function uploadLitterbox(bytes: Uint8Array, mime: string, ext: string): Promise<string | null> {
+  try {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append("time", "1h");
+    form.append("fileToUpload", blobOf(bytes, mime), `upload.${ext}`);
+    const res = await fetch("https://litterbox.catbox.moe/resources/internals/api.php", {
+      method: "POST", body: form, signal: AbortSignal.timeout(30_000),
+    });
+    const text = (await res.text()).trim();
+    return res.ok && /^https?:\/\//i.test(text) ? text : null;
+  } catch { return null; }
+}
+
+// tmpfiles.org — returns JSON {data:{url}}; the direct-download link needs "/dl/".
+async function uploadTmpfiles(bytes: Uint8Array, mime: string, ext: string): Promise<string | null> {
+  try {
+    const form = new FormData();
+    form.append("file", blobOf(bytes, mime), `upload.${ext}`);
+    const res = await fetch("https://tmpfiles.org/api/v1/upload", {
+      method: "POST", body: form, signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const url: string | undefined = data?.data?.url;
+    if (!url) return null;
+    // https://tmpfiles.org/123/x.png -> https://tmpfiles.org/dl/123/x.png (raw file)
+    return url.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+  } catch { return null; }
+}
+
+// catbox main host — last resort (works often, just not always from server IPs).
+async function uploadCatbox(bytes: Uint8Array, mime: string, ext: string): Promise<string | null> {
+  try {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append("fileToUpload", blobOf(bytes, mime), `upload.${ext}`);
+    const res = await fetch("https://catbox.moe/user/api.php", {
+      method: "POST", body: form, signal: AbortSignal.timeout(30_000),
+    });
+    const text = (await res.text()).trim();
+    return res.ok && /^https?:\/\//i.test(text) ? text : null;
+  } catch { return null; }
+}
+
 async function hostImage(bytes: Uint8Array, mime: string): Promise<string> {
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
-  const form = new FormData();
-  form.append("reqtype", "fileupload");
-  // Wrap bytes in a Blob for multipart upload.
-  form.append("fileToUpload", new Blob([bytes as BlobPart], { type: mime }), `upload.${ext}`);
-  const res = await fetch("https://catbox.moe/user/api.php", {
-    method: "POST",
-    body: form,
-    signal: AbortSignal.timeout(30_000),
-  });
-  const text = (await res.text()).trim();
-  if (!res.ok || !/^https?:\/\//i.test(text)) throw new Error("Image host rejected the upload");
-  return text;
+  // PRIMARY: ImgBB (reliable, keyed). Then free hosts as best-effort fallback.
+  const imgbb = await uploadImgbb(bytes);
+  if (imgbb) return imgbb;
+  for (const upload of [uploadLitterbox, uploadTmpfiles, uploadCatbox]) {
+    const url = await upload(bytes, mime, ext);
+    if (url) return url;
+  }
+  throw new Error("All image hosts rejected the upload");
 }
 
 export interface SupplierSearchResult {
