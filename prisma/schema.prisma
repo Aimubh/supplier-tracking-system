@@ -59,6 +59,7 @@ model Product {
   working    Json @default("{}") // Working (incl. product/sample/packaging media)
   expenses   Json @default("{}") // Expenses (Order Summary P&L actuals)
   sourcing   Json @default("{}") // Sourcing model (assumptions + per-SKU inputs)
+  qrGen      Json @default("{}") // QR Generator details (sample fast-track), optional
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

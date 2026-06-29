@@ -39,23 +39,6 @@ export function QrGeneratorView() {
 
   const canGenerate = productName.trim().length > 0 && supplierName.trim().length > 0;
 
-  // Human-readable payload encoded into the QR. (Photos are too large for a QR,
-  // so they live on the product record; the QR carries the text details.)
-  function buildQrText(g: QrGen): string {
-    return [
-      "LAZER BELIEVE — Product",
-      `Product: ${g.productName}`,
-      `Owner: ${g.ownerName || "—"}`,
-      `Supplier: ${g.supplierName}${g.supplierState ? ` (${g.supplierState})` : ""}`,
-      `MOQ: ${g.moq}`,
-      `Rate: ${g.rate} ${g.rateCurrency}`,
-      `Sample charges: ${g.sampleCharges} ${g.sampleCurrency}`,
-      `Order date: ${g.orderDate || "—"}`,
-      `Received: ${g.receivedDate || "—"}`,
-      "www.BrowseBazaar.com",
-    ].join("\n");
-  }
-
   async function handleGenerate() {
     if (!canGenerate || busy) return;
     setBusy(true);
@@ -69,16 +52,8 @@ export function QrGeneratorView() {
         createdAt: Date.now(),
       };
 
-      // 1) Render the QR from the text payload.
-      const dataUrl = await QRCode.toDataURL(buildQrText(g), {
-        errorCorrectionLevel: "M",
-        margin: 2,
-        width: 512,
-        color: { dark: "#15130e", light: "#ffffff" },
-      });
-      setQrDataUrl(dataUrl);
-
-      // 2) Build a pipeline product: sample APPROVED, Pre-Order skipped.
+      // 1) Build a pipeline product first (we need its id for the QR URL):
+      //    sample APPROVED, Pre-Order skipped.
       const p = blankProduct(g.productName);
       p.qrGen = g;
       p.supplier = { ...p.supplier, name: g.supplierName, notes: g.supplierState ? `State: ${g.supplierState}` : "" };
@@ -96,6 +71,17 @@ export function QrGeneratorView() {
 
       const id = addProductFull(p);
       setCreatedId(id);
+
+      // 2) Render the QR encoding the public scan-page URL. Scanning opens a
+      //    branded webpage with the photos, videos and details.
+      const scanUrl = `${window.location.origin}/qr/${id}`;
+      const dataUrl = await QRCode.toDataURL(scanUrl, {
+        errorCorrectionLevel: "M",
+        margin: 2,
+        width: 512,
+        color: { dark: "#15130e", light: "#ffffff" },
+      });
+      setQrDataUrl(dataUrl);
     } finally {
       setBusy(false);
     }

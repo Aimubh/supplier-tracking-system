@@ -120,10 +120,14 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
   <div class="sheet">
     <div class="top">
       <div class="brand" style="display:flex;align-items:center;gap:12px">
-        <svg width="40" height="40" viewBox="0 0 100 100" fill="#181d26" aria-label="Lazer Believe">
-          <path d="M6 6 H46 A40 40 0 0 1 6 46 Z"/><path d="M94 6 V46 A40 40 0 0 1 54 6 Z"/>
-          <path d="M6 94 V54 A40 40 0 0 1 46 94 Z"/><path d="M94 94 H54 A40 40 0 0 1 94 54 Z"/>
-          <circle cx="50" cy="50" r="5.5"/><path d="M74 4 L96 4 L96 26 L88.5 18.5 L80 27 L71.5 18.5 L80 10 Z"/>
+        <svg width="42" height="42" viewBox="0 0 200 200" fill="#181d26" aria-label="Lazer Believe">
+          <path d="M4 4 Q50 16 96 4 Q84 50 96 96 Q50 84 4 96 Q16 50 4 4 Z"/>
+          <path d="M104 4 Q150 16 196 4 Q184 50 196 96 Q150 84 104 96 Q116 50 104 4 Z"/>
+          <path d="M4 104 Q50 116 96 104 Q84 150 96 196 Q50 184 4 196 Q16 150 4 104 Z"/>
+          <path d="M104 104 Q150 116 196 104 Q184 150 196 196 Q150 184 104 196 Q116 150 104 104 Z"/>
+          <path fill="#fff" d="M100 70 Q112 88 130 100 Q112 112 100 130 Q88 112 70 100 Q88 88 100 70 Z"/>
+          <circle fill="#fff" cx="100" cy="100" r="9"/>
+          <path d="M150 12 L182 6 L176 38 L168 24 Z"/>
         </svg>
         <span>Lazer Believe<small>Lazer Ecommerce Ventures Pvt. Ltd.</small></span>
       </div>

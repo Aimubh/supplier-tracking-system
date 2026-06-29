@@ -14,8 +14,9 @@ export const config = {
   // Protect pages, but exclude: login, ALL /api routes, and Next internals.
   // (API auth is enforced inside each route handler, returning JSON errors.)
   matcher: [
-    // Protect pages, but exclude login, /api, Next internals, and static asset
-    // files in /public (svg/png/jpg/ico/…) so the logo and images load without auth.
-    "/((?!login|api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Protect pages, but exclude: login, /api, the public /qr scan pages, Next
+    // internals, and static asset files in /public (svg/png/…) so the logo,
+    // images, and scanned-QR product pages load without auth.
+    "/((?!login|api|qr/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
