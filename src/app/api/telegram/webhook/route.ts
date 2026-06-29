@@ -18,6 +18,7 @@ import { downloadTelegramFile, sendTelegram } from "@/lib/telegram";
 import { searchSuppliersByImage } from "@/lib/vendex";
 import { rankTopN, type RankedCandidate, type RankTag } from "@/lib/supplier-ranking";
 import { suggestHsn } from "@/lib/hsn-advisor";
+import { answerQuestion, qaConfigured } from "@/lib/bot-qa";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // image search can take ~60-90s
@@ -141,12 +142,36 @@ export async function POST(req: Request) {
   const chatId = String(msg.chat.id);
   const caption = msg.caption ?? msg.text ?? "";
 
-  // Only act when a photo is attached. (A bare text mention with no image can't
-  // be searched.) Nudge the user if they forgot the image.
+  // No photo → this is a TEXT message. Two cases:
+  //  - looks like a supplier search but they forgot the image → nudge.
+  //  - otherwise, if it addresses the bot, answer it as a database Q&A question.
   if (!msg.photo || msg.photo.length === 0) {
-    if (/@\w*bot/i.test(caption) || caption.includes("#")) {
+    const addressed = /@\w*bot/i.test(caption);
+    // Strip the @mention and any leftover supplier tags to get the bare question.
+    const question = caption
+      .replace(/@\w+/gi, "")
+      .replace(/#(prize|price|top|review)\b/gi, "")
+      .trim();
+
+    // They tagged the bot with a search hashtag but no photo → remind them.
+    if (/#(prize|price|top|review)\b/i.test(caption) && !question) {
       await sendTelegram("📷 Send a product *photo* and tag me with `#prize`, `#top`, or `#review`.", chatId);
+      return NextResponse.json({ ok: true });
     }
+
+    // Addressed the bot with an actual question → answer from the database.
+    if (addressed && question.length > 0) {
+      if (!qaConfigured()) {
+        await sendTelegram("🤖 I can search suppliers from a photo (+ `#prize`). Q&A from the database isn't enabled yet.", chatId);
+        return NextResponse.json({ ok: true });
+      }
+      await sendTelegram("💭 Looking that up…", chatId);
+      const answer = await answerQuestion(question);
+      await sendTelegram(answer, chatId);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Not addressed to us (ordinary group chatter) → stay silent.
     return NextResponse.json({ ok: true });
   }
 
