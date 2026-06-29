@@ -141,8 +141,14 @@ async function searchViaSerpApi(imageUrl: string): Promise<RankCandidate[]> {
   const data = await res.json();
   if (data.error) throw new Error(`SerpAPI: ${data.error}`);
   const matches: Record<string, unknown>[] = Array.isArray(data.visual_matches) ? data.visual_matches : [];
-  // Keep matches that have at least a price OR look like a shopping result.
-  const usable = matches.slice(0, 30);
+
+  // Google Lens returns many non-shopping matches (blogs, social, image pages).
+  // For a SUPPLIER bot we want buyable products, so prefer matches that have a
+  // price; if too few are priced, fall back to all matches (still useful links).
+  const priced = matches.filter((m) => m.price && typeof (m.price as { extracted_value?: number }).extracted_value === "number");
+  const pool = priced.length >= 3 ? priced : matches;
+  const usable = pool.slice(0, 30);
+  // Preserve original Lens position for the image-rank score (don't renumber).
   return usable.map((m, i) => lensToCandidate(m, i, usable.length));
 }
 
