@@ -128,6 +128,53 @@ export async function pipelineOverview() {
   return { activeProducts: rows.length, byPhase: counts };
 }
 
+// Compact, READ-ONLY snapshot of ALL active products + manufacturers, sized to
+// fit in an LLM context for one-shot Q&A. Strips base64/media; keeps the facts a
+// question might need. Safe: pure reads, no raw SQL, no secrets.
+export async function dataSummary() {
+  const [prodRows, manRows] = await Promise.all([
+    prisma.product.findMany({ where: { filed: false }, select: PRODUCT_SELECT, orderBy: { createdAt: "desc" } }) as Promise<RawProduct[]>,
+    prisma.manufacturer.findMany({
+      select: {
+        id: true, name: true, type: true, verification: true, city: true,
+        productLines: true, repName: true, repNumber: true, website: true, moq: true, rating: true,
+      },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  const products = prodRows.map((p) => {
+    const f = phaseOf(p), m = moneyOf(p), c = j(p.compliance), s = j(p.supplier), l = j(p.logistics);
+    return {
+      name: p.name,
+      category: p.category || "—",
+      phase: f.phase,
+      progressPct: f.percent,
+      nextStep: f.nextStep,
+      supplier: String(s.name ?? "—"),
+      supplierVerified: s.verification === "VERIFIED",
+      hsCode: String(c.hsCode ?? "—"),
+      compliance: String(c.status ?? "—"),
+      quantity: m.qty,
+      orderValue: m.orderValue,
+      advancePaid: m.advancePaid,
+      expenses: m.expenses,
+      currency: m.currency,
+      eta: String(l.eta ?? "—"),
+      arrivedInInventory: !!l.handedToInventory,
+      lastUpdated: p.updatedAt.toISOString().slice(0, 10),
+    };
+  });
+
+  return {
+    generatedAt: new Date().toISOString().slice(0, 10),
+    activeProductCount: products.length,
+    products,
+    manufacturerCount: manRows.length,
+    manufacturers: manRows,
+  };
+}
+
 // Search manufacturers/suppliers by name, city, type, or product lines. Returns
 // only useful text fields — base64 images/catalogs are stripped (huge + useless
 // in an AI context).

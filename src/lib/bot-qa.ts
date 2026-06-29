@@ -1,113 +1,78 @@
-// AI Q&A for the Telegram bot — answers free-text questions about the data by
-// letting Claude call READ-ONLY database tools (src/lib/bot-db-tools.ts).
+// AI Q&A for the Telegram bot — answers free-text questions about the data.
 //
-// Safety: Claude can only invoke the curated tools below, every one of which
-// READS. It cannot run raw SQL, write, or reach anything outside these functions.
-// Requires ANTHROPIC_API_KEY. Uses the SDK tool runner so the agentic loop
-// (call tool → feed result → answer) is handled automatically.
+// Uses Google Gemini (free tier) via the stable REST generateContent endpoint.
+// Approach: fetch a compact, READ-ONLY summary of the database (dataSummary())
+// and pass it to Gemini as grounding context; Gemini answers from that snapshot.
+// No function-calling loop, no raw SQL, no writes — the model only ever sees a
+// read-only summary we built, so it cannot reach or modify anything else.
 
-import Anthropic from "@anthropic-ai/sdk";
-import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { z } from "zod";
-import {
-  listProducts, getProduct, financialSummary, pipelineOverview, searchManufacturers,
-} from "./bot-db-tools";
+import { dataSummary } from "./bot-db-tools";
+
+const GEMINI_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
 export function qaConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(GEMINI_KEY);
 }
 
-const PHASE = z.enum(["pre-order", "on-working", "post-order", "done"]);
+const SYSTEM = `You are the assistant for Lazer Believe's Supplier Tracking System — an internal app that tracks products sourced from China through a gated pipeline: Pre-Order → On-Working → Post-Order → done.
 
-// Read-only tools Claude may call. Each wraps a function from bot-db-tools.
-const tools = [
-  betaZodTool({
-    name: "list_products",
-    description:
-      "List/count active products in the sourcing pipeline. Optionally filter by phase " +
-      "(pre-order, on-working, post-order, done) or category. Use for questions like " +
-      "'how many products are in QC', 'what's in post-order', 'list electronics products'.",
-    inputSchema: z.object({
-      phase: PHASE.optional().describe("Filter to one pipeline phase"),
-      category: z.string().optional().describe("Filter by product category (partial match)"),
-      includeFiled: z.boolean().optional().describe("Include archived/filed products (default false)"),
-    }),
-    run: async (input) => JSON.stringify(await listProducts(input)),
-  }),
-  betaZodTool({
-    name: "get_product",
-    description:
-      "Get full detail for ONE product by name (partial, case-insensitive) or id: phase, " +
-      "progress %, supplier, HS code, compliance, quantity, order value, advance paid, " +
-      "expenses, ETA, arrival status. Use for 'tell me about the X product', 'status of Y'.",
-    inputSchema: z.object({
-      nameOrId: z.string().describe("Product name (partial ok) or exact id"),
-    }),
-    run: async (input) => JSON.stringify(await getProduct(input.nameOrId)),
-  }),
-  betaZodTool({
-    name: "pipeline_overview",
-    description:
-      "Counts of active products in each pipeline phase (pre-order / on-working / post-order / done). " +
-      "Use for 'how's the pipeline', 'where are all my products', overview questions.",
-    inputSchema: z.object({}),
-    run: async () => JSON.stringify(await pipelineOverview()),
-  }),
-  betaZodTool({
-    name: "financial_summary",
-    description:
-      "Portfolio financial totals across active products, grouped by currency: total order value, " +
-      "advance paid, expenses, product count. Use for 'total order value', 'how much have we paid', " +
-      "'total expenses'. Note: totals are per-currency (not converted).",
-    inputSchema: z.object({}),
-    run: async () => JSON.stringify(await financialSummary()),
-  }),
-  betaZodTool({
-    name: "search_manufacturers",
-    description:
-      "Search the manufacturer/supplier directory by name, city, type, or product lines. Returns " +
-      "name, type, verification, city, rep contact, rating, MOQ, notes. Use for 'find suppliers in " +
-      "Shenzhen', 'which manufacturers make bottles', 'is supplier X verified'.",
-    inputSchema: z.object({
-      query: z.string().describe("Search text — supplier name, city, product, etc. Empty = list all."),
-    }),
-    run: async (input) => JSON.stringify(await searchManufacturers(input.query)),
-  }),
-];
+You are given a JSON snapshot of the current database. Answer the user's question using ONLY that snapshot.
 
-const SYSTEM = `You are the assistant for Lazer Believe's Supplier Tracking System — an internal app that tracks products sourced from China through a gated pipeline (Pre-Order → On-Working → Post-Order).
+Rules:
+- Use only the data provided. Never invent products, numbers, suppliers, or dates.
+- If the snapshot doesn't contain the answer, say so plainly and suggest what they could ask.
+- Money: show the currency code/symbol from the data; don't convert currencies unless asked.
+- This is a Telegram reply: be concise, use short scannable lines, minimal emoji, no markdown tables.
+- You can only READ. If asked to change/add/delete data, say you can answer questions but not modify data.`;
 
-Answer the user's question using ONLY the database tools provided. Rules:
-- Call tools to get real data; never invent products, numbers, or suppliers.
-- Be concise and use plain language — this is a Telegram reply. Use short lines, not long paragraphs.
-- Money: show the currency (₹/$/¥) the data uses; don't convert between currencies unless asked.
-- If the tools return nothing relevant, say so plainly and suggest what they could ask instead.
-- You can READ data only. If asked to change/add/delete anything, explain you can only answer questions, not modify data.
-- Format for Telegram: short, scannable, emoji sparingly. No markdown tables.`;
-
-// Answer a free-text question. Returns the reply text (already Telegram-friendly).
+// Answer a free-text question grounded on the DB snapshot. Returns Telegram text.
 export async function answerQuestion(question: string): Promise<string> {
   if (!qaConfigured()) {
-    return "🤖 Q&A isn't configured yet (missing ANTHROPIC_API_KEY).";
+    return "🤖 Q&A isn't configured yet (missing GEMINI_API_KEY).";
   }
-  const client = new Anthropic();
+
+  let snapshot: unknown;
   try {
-    const final = await client.beta.messages.toolRunner({
-      model: "claude-opus-4-8",
-      max_tokens: 1024,
-      system: SYSTEM,
-      tools,
-      messages: [{ role: "user", content: question }],
-    });
-    // Collect the text blocks from the final assistant message.
-    const text = final.content
-      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("\n")
-      .trim();
-    return text || "I couldn't find an answer for that. Try asking about products, suppliers, or totals.";
+    snapshot = await dataSummary();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown error";
-    return `⚠️ Couldn't answer that right now (${msg}).`;
+    return `⚠️ Couldn't read the database (${e instanceof Error ? e.message : "db error"}).`;
+  }
+
+  const prompt =
+    `${SYSTEM}\n\n` +
+    `DATABASE SNAPSHOT (JSON):\n${JSON.stringify(snapshot)}\n\n` +
+    `QUESTION: ${question}\n\nAnswer:`;
+
+  try {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent` +
+      `?key=${encodeURIComponent(GEMINI_KEY)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 800 },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return `⚠️ Q&A is unavailable right now (Gemini HTTP ${res.status}). ${body.slice(0, 120)}`;
+    }
+    const data = await res.json();
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts
+      ?.map((p: { text?: string }) => p.text ?? "")
+      .join("")
+      .trim();
+    if (text) return text;
+    // Blocked or empty — surface the reason if present.
+    const reason = data?.candidates?.[0]?.finishReason ?? data?.promptFeedback?.blockReason;
+    return reason
+      ? `I couldn't answer that (${reason}). Try rephrasing.`
+      : "I couldn't find an answer for that. Try asking about products, suppliers, phases, or totals.";
+  } catch (e) {
+    return `⚠️ Couldn't answer that right now (${e instanceof Error ? e.message : "error"}).`;
   }
 }
