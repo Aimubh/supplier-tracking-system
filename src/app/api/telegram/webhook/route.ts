@@ -47,17 +47,28 @@ function formatReply(top: RankedCandidate[], tag: RankTag, note?: string): strin
       ? "🔎 *Top suppliers* (ranked by image match)"
       : `🔎 *Top suppliers* — ${pct}% image + ${100 - pct}% ${dimensionLabel(tag)}`;
 
+  const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
   const lines = top.map((s, i) => {
-    const price =
-      s.priceUsd != null ? `$${s.priceUsd.toFixed(2)}` : s.priceInr != null ? `₹${s.priceInr}` : "price n/a";
+    // Prefer the INR value; fall back to converting USD at ~83.
+    const retailInr = s.priceInr != null ? s.priceInr : s.priceUsd != null ? s.priceUsd / 0.012 : null;
+    let price = "price n/a";
+    if (retailInr != null) {
+      // Estimated wholesale/FOB band: retail is typically 2-3x the factory price,
+      // so wholesale ≈ 30-50% of retail. Clearly an ESTIMATE, not a real quote.
+      const wholesaleLo = retailInr * 0.3;
+      const wholesaleHi = retailInr * 0.5;
+      price = `retail ${inr(retailInr)} · est. wholesale ${inr(wholesaleLo)}–${inr(wholesaleHi)}`;
+    }
     const stars = s.rating != null ? `⭐${s.rating}` : "";
     const revs = s.reviews != null ? `(${s.reviews.toLocaleString()} reviews)` : "";
-    const meta = [price, stars, revs].filter(Boolean).join(" · ");
+    const meta = [stars, revs].filter(Boolean).join(" · ");
     const name = s.url ? `[${escapeMd(s.name)}](${s.url})` : `*${escapeMd(s.name)}*`;
-    return `${i + 1}. ${name} — ${meta}`;
+    return `${i + 1}. ${name}\n   ${price}${meta ? " · " + meta : ""}`;
   });
 
-  const footer = note ? `\n\n⚠️ ${escapeMd(note)}` : "";
+  const estNote = "💡 Wholesale is an *estimate* (≈30–50% of retail). For exact 1688/Alibaba FOB, open the links or enable the wholesale source.";
+  const footer = `\n\n${estNote}${note ? `\n⚠️ ${escapeMd(note)}` : ""}`;
   return `${header}\n\n${lines.join("\n")}${footer}`;
 }
 
