@@ -22,7 +22,7 @@ const SERPAPI_KEY = process.env.SERPAPI_KEY ?? "";
 // TMAPI — 1688/Alibaba image search (WHOLESALE / FOB prices). The bot's primary
 // source when set; Lens is the retail fallback.
 const TMAPI_TOKEN = process.env.TMAPI_TOKEN ?? "";
-const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.top";
+const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.io";
 // USD-per-unit conversion so prices in different currencies rank comparably.
 // CNY matters most here (1688 quotes in ¥).
 const FX_TO_USD: Record<string, number> = { USD: 1, "$": 1, INR: 0.012, "₹": 0.012, EUR: 1.08, "€": 1.08, GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, RMB: 0.14, AED: 0.27 };
@@ -282,19 +282,27 @@ export async function searchSuppliersByImage(
       const imageUrl = await hostImage(bytes, mime);
       const suppliers = await searchViaSerpApi(imageUrl);
       if (suppliers.length > 0) {
+        const anyPriced = suppliers.some((s) => s.priceUsd != null);
         return {
           ok: true,
           mock: false,
           suppliers,
-          note: "Prices are retail (Google Lens). Alibaba wholesale FOB will be lower — check the links.",
+          note: anyPriced
+            ? "Prices are retail (Google Lens). Alibaba wholesale FOB will be lower — check the links."
+            : "Matched listings via Google Lens (no prices on these results — open the links). For wholesale FOB, enable the 1688 source.",
         };
       }
-      // No matches → fall through to Vendex/mock below.
+      // Lens ran but found nothing for this photo. If Vendex isn't configured,
+      // tell the user honestly rather than showing mock data as if it were real.
+      if (!process.env.VENDEX_API_URL) {
+        return { ok: false, mock: false, suppliers: [], error: "No matches for that photo. Try a clearer, well-lit shot of just the product on a plain background." };
+      }
+      // else fall through to the Vendex attempt
     } catch (e) {
-      // Lens failed (quota/network) → try Vendex, else mock. Don't go silent.
+      // Lens failed (quota/network). If Vendex isn't configured, report it.
       const msg = e instanceof Error ? e.message : "lens failed";
-      if (!process.env.VENDEX_API_URL || mockForced()) {
-        return { ok: true, mock: true, suppliers: mockSuppliers(), note: `Lens search unavailable (${msg}) — showing sample data.` };
+      if (!process.env.VENDEX_API_URL) {
+        return { ok: false, mock: false, suppliers: [], error: `Image search is temporarily unavailable (${msg}). Try again shortly.` };
       }
       // else fall through to the Vendex attempt
     }
