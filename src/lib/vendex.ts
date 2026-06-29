@@ -17,10 +17,21 @@ const VENDEX_TOKEN = process.env.VENDEX_API_TOKEN ?? "";
 const POLL_TIMEOUT_MS = 90_000;
 const POLL_EVERY_MS = 2_500;
 
-// SerpAPI Google Lens — direct reverse-image search, no separate scraper service.
+// SerpAPI Google Lens — direct reverse-image search (RETAIL prices).
 const SERPAPI_KEY = process.env.SERPAPI_KEY ?? "";
-// USD-per-unit conversion for non-USD Lens prices, so price ranking is comparable.
-const FX_TO_USD: Record<string, number> = { USD: 1, "$": 1, INR: 0.012, "₹": 0.012, EUR: 1.08, "€": 1.08, GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, AED: 0.27 };
+// TMAPI — 1688/Alibaba image search (WHOLESALE / FOB prices). The bot's primary
+// source when set; Lens is the retail fallback.
+const TMAPI_TOKEN = process.env.TMAPI_TOKEN ?? "";
+const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.top";
+// USD-per-unit conversion so prices in different currencies rank comparably.
+// CNY matters most here (1688 quotes in ¥).
+const FX_TO_USD: Record<string, number> = { USD: 1, "$": 1, INR: 0.012, "₹": 0.012, EUR: 1.08, "€": 1.08, GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, RMB: 0.14, AED: 0.27 };
+
+function toUsd(value: number | null | undefined, currency: string | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const rate = FX_TO_USD[String(currency ?? "USD")] ?? 1;
+  return value * rate;
+}
 
 function authHeaders(): Record<string, string> {
   return VENDEX_TOKEN
@@ -152,8 +163,92 @@ async function searchViaSerpApi(imageUrl: string): Promise<RankCandidate[]> {
   return usable.map((m, i) => lensToCandidate(m, i, usable.length));
 }
 
+// --- TMAPI 1688/Alibaba image search (WHOLESALE) -----------------------------
+// Helper: read the first present key from a set of candidate names (TMAPI's exact
+// field names are confirmed against the live response; this stays tolerant of
+// minor naming differences like price vs promotion_price).
+function pick(o: Record<string, unknown>, keys: string[]): unknown {
+  for (const k of keys) {
+    if (o[k] !== undefined && o[k] !== null && o[k] !== "") return o[k];
+  }
+  return undefined;
+}
+function num(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const m = v.replace(/[, ]/g, "").match(/-?\d+(\.\d+)?/);
+    if (m) return parseFloat(m[0]);
+  }
+  return null;
+}
+
+// Map one TMAPI 1688 item into a RankCandidate. 1688 prices are CNY wholesale/FOB.
+function tmapiToCandidate(it: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const priceCny = num(pick(it, ["price", "promotion_price", "sale_price", "wholesale_price", "min_price"]));
+  const priceUsd = toUsd(priceCny, "CNY");
+  const reviews = num(pick(it, ["sales", "sold", "orders", "sale_count", "monthly_sold", "trade_count"]));
+  const rating = num(pick(it, ["rating", "score", "shop_score", "star"]));
+  const title = String(pick(it, ["title", "name", "subject", "product_title"]) ?? "");
+  const shop = String(pick(it, ["shop_name", "company_name", "seller", "nick", "supplier", "shop_title"]) ?? "1688 supplier");
+  const url = String(pick(it, ["product_url", "detail_url", "item_url", "url", "link"]) ?? "");
+  const img = String(pick(it, ["pic_url", "image", "img", "main_image", "image_url", "pic"]) ?? "");
+  // Result order from TMAPI is the visual-match order → image score (1 = best).
+  const pos = index + 1;
+  const imageScore = total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1;
+  return {
+    name: shop,
+    title,
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews,
+    rating,
+    country: "CN",
+    url,
+    image: img,
+    platform: "alibaba", // wholesale / FOB
+    imageScore,
+  };
+}
+
+// TMAPI requires the image be on an Alibaba-affiliated host, so first convert our
+// public image URL into an Alibaba-hosted one, then run the image search.
+async function searchViaTmapi(imageUrl: string): Promise<RankCandidate[]> {
+  // 1) Convert the public image URL to an Alibaba-hosted URL TMAPI can search.
+  let aliImg = imageUrl;
+  try {
+    const conv = await fetch(
+      `${TMAPI_BASE}/1688/tool/image_url_convert?apiToken=${encodeURIComponent(TMAPI_TOKEN)}&img_url=${encodeURIComponent(imageUrl)}`,
+      { signal: AbortSignal.timeout(30_000) }
+    );
+    if (conv.ok) {
+      const cj = await conv.json();
+      const converted = pick(cj?.data ?? cj ?? {}, ["image_url", "img_url", "url", "ali_image_url"]);
+      if (typeof converted === "string" && converted) aliImg = converted;
+    }
+  } catch {
+    /* fall through with the original URL — search may still accept it */
+  }
+
+  // 2) Image search on 1688 (sorted cheapest-first as a sensible default).
+  const url = `${TMAPI_BASE}/1688/search/image?apiToken=${encodeURIComponent(TMAPI_TOKEN)}&img_url=${encodeURIComponent(aliImg)}&page=1&page_size=20&sort=price_up`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(40_000) });
+  if (!res.ok) throw new Error(`TMAPI HTTP ${res.status}`);
+  const data = await res.json();
+  // TMAPI wraps results; tolerate a few shapes: data.items / data.data.items / items.
+  const container = (data?.data ?? data) as Record<string, unknown>;
+  const itemsRaw = pick(container, ["items", "products", "list", "result"]) ?? [];
+  const items: Record<string, unknown>[] = Array.isArray(itemsRaw) ? itemsRaw : [];
+  if (items.length === 0) {
+    // Surface TMAPI's own error/message if present, for easier debugging.
+    const msg = String(pick(container, ["message", "msg", "error"]) ?? data?.code ?? "no items");
+    throw new Error(`TMAPI returned no items (${msg})`);
+  }
+  const usable = items.slice(0, 20);
+  return usable.map((it, i) => tmapiToCandidate(it, i, usable.length));
+}
+
 // Run the full image → suppliers pipeline. Never throws; returns a result object.
-// Priority: SerpAPI Lens (if SERPAPI_KEY) → Vendex (if reachable) → mock.
+// Priority: TMAPI 1688 wholesale → SerpAPI Lens retail → Vendex → mock.
 export async function searchSuppliersByImage(
   bytes: Uint8Array,
   mime: string
@@ -162,7 +257,26 @@ export async function searchSuppliersByImage(
     return { ok: true, mock: true, suppliers: mockSuppliers(), note: "Mock data (BOT_MOCK_SUPPLIERS=1)." };
   }
 
-  // PRIMARY: SerpAPI Google Lens — real reverse-image search, no Vendex needed.
+  // PRIMARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
+  if (TMAPI_TOKEN) {
+    try {
+      const imageUrl = await hostImage(bytes, mime);
+      const suppliers = await searchViaTmapi(imageUrl);
+      if (suppliers.length > 0) {
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: "Wholesale / FOB prices from 1688 (Alibaba). MOQ applies — check the links.",
+        };
+      }
+      // No 1688 matches → fall through to Lens (retail) below.
+    } catch {
+      // TMAPI failed/quota → fall through to Lens, then mock. Never go silent.
+    }
+  }
+
+  // SECONDARY: SerpAPI Google Lens — RETAIL prices (no wholesale source / fallback).
   if (SERPAPI_KEY) {
     try {
       const imageUrl = await hostImage(bytes, mime);
