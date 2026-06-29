@@ -40,19 +40,37 @@ function dimensionLabel(tag: RankTag): string {
   return "image match";
 }
 
-// Best-fit Indian HSN code for the product, derived from the supplier titles.
-// Returns a one-line summary (code + duty) or "" if nothing matches.
-function hsnLine(top: RankedCandidate[]): string {
+// Top-5 candidate Indian HSN codes for the product, derived from the supplier
+// titles, each with its duty calculation. Returns a multi-line block, or "".
+// `landedInr` (cheapest supplier's price, INR) lets us show the actual ₹ duty.
+function hsnBlock(top: RankedCandidate[], landedInr: number | null): string {
   // Pool the titles so keyword matching has the most text to work with.
   const text = top.map((s) => s.title).filter(Boolean).join(" ");
   if (!text.trim()) return "";
-  const cands = suggestHsn(text);
+  const cands = suggestHsn(text, "", 5);
   if (cands.length === 0) return "";
-  const best = cands[0];
-  // Duty/GST in the table are fractions (0.1 = 10%), so ×100 for display.
-  const duty = Math.round(best.effectiveDutyPct * 100);
-  const gst = Math.round(best.gstPct * 100);
-  return `🏷️ *HSN ${best.hsn}* — ${escapeMd(best.title)} · ~${duty}% duty + ${gst}% GST (India import)`;
+
+  const pct = (f: number) => `${Math.round(f * 100)}%`;
+  // Only flag "lowest duty" if duties actually differ across candidates.
+  const minDuty = Math.min(...cands.map((c) => c.effectiveDutyPct));
+  const allSame = cands.every((c) => Math.abs(c.effectiveDutyPct - minDuty) < 1e-9);
+  const rows = cands.map((c, i) => {
+    const bcd = pct(c.bcdPct);
+    const sws = pct(c.bcdPct * c.swsPct); // SWS = 10% OF the BCD
+    const eff = pct(c.effectiveDutyPct);
+    const gst = pct(c.gstPct);
+    const isLowest = !allSame && Math.abs(c.effectiveDutyPct - minDuty) < 1e-9;
+    const tag = isLowest ? " ✅ lowest duty" : "";
+    // Per-unit duty in ₹ when we know the cheapest landed price.
+    const dutyInr = landedInr != null ? ` ≈ ₹${Math.round(landedInr * c.effectiveDutyPct).toLocaleString("en-IN")}/unit` : "";
+    return (
+      `${i + 1}. *${c.hsn}* — ${escapeMd(c.title)}${tag}\n` +
+      `    BCD ${bcd} + SWS ${sws} = *${eff} duty*, then GST ${gst}${dutyInr}`
+    );
+  });
+
+  const lead = landedInr != null ? ` · est. on ₹${Math.round(landedInr).toLocaleString("en-IN")}/unit` : "";
+  return `🏷️ *Top HSN codes* (India import, duty on CIF${lead})\n${rows.join("\n")}`;
 }
 
 // Build the Markdown reply for the top-N ranked suppliers.
@@ -83,10 +101,18 @@ function formatReply(top: RankedCandidate[], tag: RankTag, note?: string): strin
     return `${i + 1}. ${name}\n   ${price}${meta ? " · " + meta : ""}`;
   });
 
-  const hsn = hsnLine(top);
-  const estNote = "💡 Wholesale is an *estimate* (≈30–50% of retail). For exact 1688/Alibaba FOB, open the links or enable the wholesale source.";
+  // Cheapest landed estimate (mid of the wholesale band of the cheapest supplier)
+  // to express duty in ₹ per unit.
+  const prices = top
+    .map((s) => (s.priceInr != null ? s.priceInr : s.priceUsd != null ? s.priceUsd / 0.012 : null))
+    .filter((n): n is number => n != null);
+  const cheapest = prices.length ? Math.min(...prices) : null;
+  const landedEst = cheapest != null ? cheapest * 0.4 : null; // mid of 30–50% wholesale band
+
+  const hsn = hsnBlock(top, landedEst);
+  const estNote = "💡 Wholesale is an *estimate* (≈30–50% of retail). HSN/duty are suggestions — verify before filing.";
   const footer = `\n\n${estNote}${note ? `\n⚠️ ${escapeMd(note)}` : ""}`;
-  return `${header}${hsn ? `\n${hsn}` : ""}\n\n${lines.join("\n")}${footer}`;
+  return `${header}\n\n${lines.join("\n")}${hsn ? `\n\n${hsn}` : ""}${footer}`;
 }
 
 // Escape Telegram-Markdown-significant chars in dynamic text.
