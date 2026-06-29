@@ -13,9 +13,9 @@ export default function LoginPage() {
       <PageEnter className="w-full max-w-[420px]">
         {/* Brand */}
         <EnterItem className="mb-6 flex flex-col items-center text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-ink font-display text-lg font-semibold text-white">
-            LB
-          </div>
+          {/* Lazer Believe logo */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/lazer-logo.svg" alt="Lazer Believe" className="h-16 w-auto text-ink" />
           <h1 className="mt-4 font-display text-[28px] font-medium tracking-tight text-ink">
             Welcome to <span className="grad-text">Sourcing Tracker</span>
           </h1>

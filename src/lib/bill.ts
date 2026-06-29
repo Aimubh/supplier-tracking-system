@@ -119,7 +119,14 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
   <div class="noprint"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
   <div class="sheet">
     <div class="top">
-      <div class="brand">Lazer Believe<small>Lazer Ecommerce Ventures Pvt. Ltd.</small></div>
+      <div class="brand" style="display:flex;align-items:center;gap:12px">
+        <svg width="40" height="40" viewBox="0 0 100 100" fill="#181d26" aria-label="Lazer Believe">
+          <path d="M6 6 H46 A40 40 0 0 1 6 46 Z"/><path d="M94 6 V46 A40 40 0 0 1 54 6 Z"/>
+          <path d="M6 94 V54 A40 40 0 0 1 46 94 Z"/><path d="M94 94 H54 A40 40 0 0 1 94 54 Z"/>
+          <circle cx="50" cy="50" r="5.5"/><path d="M74 4 L96 4 L96 26 L88.5 18.5 L80 27 L71.5 18.5 L80 10 Z"/>
+        </svg>
+        <span>Lazer Believe<small>Lazer Ecommerce Ventures Pvt. Ltd.</small></span>
+      </div>
       <div class="doc">
         <h1>Order Bill</h1>
         <p>${esc(dateLabel)}</p>

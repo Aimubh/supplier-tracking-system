@@ -20,6 +20,7 @@ import { canAccess, type AppUser, type Role, type TabKey } from "@/lib/access";
 // tabs are what actually mutate.)
 export const PRODUCT_TABS: TabKey[] = [
   "dashboard",
+  "qr-generator",
   "pre-order",
   "on-working",
   "post-order",

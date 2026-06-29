@@ -14,6 +14,7 @@ import {
   Users,
   Building2,
   Receipt,
+  QrCode,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { TABS, TAB_STEPS, type TabKey, canAccess } from "@/lib/access";
@@ -23,6 +24,7 @@ import { motion, AnimatePresence, staggerParent, riseItem, useReducedMotion } fr
 const TAB_ICON: Record<TabKey, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
   directory: Building2,
+  "qr-generator": QrCode,
   "pre-order": Search,
   "on-working": Factory,
   "post-order": Ship,
@@ -42,9 +44,11 @@ export function Sidebar() {
     <aside className="sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col border-r border-line bg-white lg:flex">
       {/* Masthead */}
       <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink font-display text-sm font-semibold text-white">
-          LB
-        </div>
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink p-2 text-white">
+          {/* Lazer Believe mark */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/lazer-mark.svg" alt="Lazer Believe" className="h-full w-full brightness-0 invert" />
+        </span>
         <div className="leading-tight">
           <p className="font-display text-[15px] font-semibold tracking-tight text-ink">
             Sourcing Tracker

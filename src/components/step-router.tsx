@@ -26,6 +26,7 @@ import {
 const PANELS: Record<TabKey, Record<number, () => JSX.Element | null>> = {
   dashboard: {},
   directory: {},
+  "qr-generator": {}, // standalone page, no stepped panels
   "order-summary": {},
   "pre-order": {
     1: MarketPanel,

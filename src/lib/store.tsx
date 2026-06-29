@@ -383,6 +383,28 @@ export interface Product {
   working: Working;
   expenses: Expenses;
   sourcing: Sourcing;
+  // Set when the product was created via the QR Generator (sample already in
+  // hand → Pre-Order skipped). Optional so existing products stay valid.
+  qrGen?: QrGen;
+}
+
+// Details captured by the QR Generator tab. These are encoded into the QR code
+// and shown when it's scanned. The product is created with the sample APPROVED
+// and Pre-Order skipped, then the user is taken to On-Working.
+export interface QrGen {
+  skippedPreOrder: boolean;
+  orderDate: string; // ISO date
+  receivedDate: string; // ISO date the sample was received
+  ownerName: string; // who logged it
+  productName: string;
+  moq: number;
+  rate: number; // per-unit / agreed rate
+  rateCurrency: CurrencyCode;
+  sampleCharges: number;
+  sampleCurrency: CurrencyCode;
+  supplierName: string;
+  supplierState: string; // supplier's state / region
+  createdAt: number;
 }
 
 // ---- Defaults -----------------------------------------------------------------
@@ -704,6 +726,9 @@ interface StoreShape {
   active: Product | null;
   setActiveId: (id: string) => void;
   addProduct: (name: string) => void;
+  // Add a fully-built product (e.g. from the QR Generator, which pre-fills it and
+  // skips Pre-Order). Returns the new product id.
+  addProductFull: (product: Product) => string;
   removeProduct: (id: string) => void;
   // file a product to the dashboard and clear the active process
   fileProduct: (id: string) => void;
@@ -795,6 +820,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setProducts((prev) => [...prev, p]);
     setActiveIdState(p.id);
     apiSend("POST", "/api/products", p);
+  }, []);
+
+  // Persist a pre-built product (QR Generator path). Caller has already shaped it
+  // (sample approved, pre-order skipped, etc.). Makes it the active product.
+  const addProductFull = useCallback((product: Product) => {
+    setProducts((prev) => [...prev, product]);
+    setActiveIdState(product.id);
+    apiSend("POST", "/api/products", product);
+    return product.id;
   }, []);
 
   const removeProduct = useCallback((id: string) => {
@@ -895,6 +929,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     active,
     setActiveId,
     addProduct,
+    addProductFull,
     removeProduct,
     fileProduct,
     reopenProduct,

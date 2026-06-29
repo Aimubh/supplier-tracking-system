@@ -12,6 +12,7 @@ import {
 export type TabKey =
   | "dashboard"
   | "directory"
+  | "qr-generator"
   | "pre-order"
   | "on-working"
   | "post-order"
@@ -20,6 +21,7 @@ export type TabKey =
 export const TABS: { key: TabKey; label: string; tagline: string }[] = [
   { key: "dashboard", label: "Dashboard", tagline: "Overview across the pipeline" },
   { key: "directory", label: "Manufacturer / Trader Directory", tagline: "Reusable address book of factories & traders" },
+  { key: "qr-generator", label: "QR Generator", tagline: "Have a sample? Log it, generate a QR, skip to On-Working" },
   { key: "pre-order", label: "Pre-Order", tagline: "Decide before we spend a rupee" },
   { key: "on-working", label: "On-Working", tagline: "After we decide to buy" },
   { key: "post-order", label: "Post-Order", tagline: "Getting it home" },
@@ -46,7 +48,7 @@ export const SEED_USERS: AppUser[] = [
     name: "Bhavya",
     email: "admin@gmail.com",
     role: "ADMIN",
-    access: ["dashboard", "directory", "pre-order", "on-working", "post-order"],
+    access: ["dashboard", "directory", "qr-generator", "pre-order", "on-working", "post-order"],
     active: true,
   },
   {
