@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { downloadTelegramFile, sendTelegram } from "@/lib/telegram";
 import { searchSuppliersByImage } from "@/lib/vendex";
 import { rankTopN, type RankedCandidate, type RankTag } from "@/lib/supplier-ranking";
+import { suggestHsn } from "@/lib/hsn-advisor";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // image search can take ~60-90s
@@ -37,6 +38,21 @@ function dimensionLabel(tag: RankTag): string {
   if (tag.dimension === "top") return "best rating";
   if (tag.dimension === "review") return "most reviews";
   return "image match";
+}
+
+// Best-fit Indian HSN code for the product, derived from the supplier titles.
+// Returns a one-line summary (code + duty) or "" if nothing matches.
+function hsnLine(top: RankedCandidate[]): string {
+  // Pool the titles so keyword matching has the most text to work with.
+  const text = top.map((s) => s.title).filter(Boolean).join(" ");
+  if (!text.trim()) return "";
+  const cands = suggestHsn(text);
+  if (cands.length === 0) return "";
+  const best = cands[0];
+  // Duty/GST in the table are fractions (0.1 = 10%), so ×100 for display.
+  const duty = Math.round(best.effectiveDutyPct * 100);
+  const gst = Math.round(best.gstPct * 100);
+  return `🏷️ *HSN ${best.hsn}* — ${escapeMd(best.title)} · ~${duty}% duty + ${gst}% GST (India import)`;
 }
 
 // Build the Markdown reply for the top-N ranked suppliers.
@@ -67,9 +83,10 @@ function formatReply(top: RankedCandidate[], tag: RankTag, note?: string): strin
     return `${i + 1}. ${name}\n   ${price}${meta ? " · " + meta : ""}`;
   });
 
+  const hsn = hsnLine(top);
   const estNote = "💡 Wholesale is an *estimate* (≈30–50% of retail). For exact 1688/Alibaba FOB, open the links or enable the wholesale source.";
   const footer = `\n\n${estNote}${note ? `\n⚠️ ${escapeMd(note)}` : ""}`;
-  return `${header}\n\n${lines.join("\n")}${footer}`;
+  return `${header}${hsn ? `\n${hsn}` : ""}\n\n${lines.join("\n")}${footer}`;
 }
 
 // Escape Telegram-Markdown-significant chars in dynamic text.
