@@ -2,8 +2,58 @@
 // Reads what's already entered across the tabs and folds in the actual expenses
 // recorded on the Order Summary page itself. Pure function, no side effects.
 
-import type { Product, CurrencyCode } from "./store";
+import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
 import { getFlow } from "./flow";
+import { convert, type Rates } from "./fx";
+
+// ---- per-field currency resolution ------------------------------------------
+// Each money field may carry its own currency override. When absent, expense and
+// product fields fall back to the product currency, shipment fields to the
+// shipment currency — i.e. the original single-currency-per-section behaviour.
+
+export function prodCurrency(p: Product): CurrencyCode {
+  return p.working.rateCurrency ?? "INR";
+}
+export function shipCurrency(p: Product): CurrencyCode {
+  return p.working.shipmentCurrency ?? "INR";
+}
+
+// Currency an itemised expense field is entered in.
+export function expenseCurrency(p: Product, field: ExpenseMoneyField): CurrencyCode {
+  return p.expenses.fieldCurrency?.[field] ?? prodCurrency(p);
+}
+
+// Currency a payment amount is entered in. rateValue/advancePaid default to the
+// product currency; shipmentValue/shipmentAdvance to the shipment currency.
+export function paymentCurrency(
+  p: Product,
+  field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance"
+): CurrencyCode {
+  const override = p.working.paymentCurrency?.[field];
+  if (override) return override;
+  return field.startsWith("shipment") ? shipCurrency(p) : prodCurrency(p);
+}
+
+// All itemised expense money fields, in display order.
+export const EXPENSE_MONEY_FIELDS: ExpenseMoneyField[] = [
+  "oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge",
+  "dutyActual", "chaCharges", "lastMileCost", "otherExpense",
+];
+
+// Sum every itemised expense field, converting each from its own currency into
+// `to` using live rates. `indiaTransportCost` (a Logistics field) is treated as
+// being in the product currency, matching the original behaviour. Returns the
+// total expressed in `to`. With rates=null, convert() is an identity, so this
+// degrades to the old raw sum (fine while rates load / for same-currency data).
+export function expensesIn(p: Product, to: CurrencyCode, rates: Rates | null): number {
+  const e = p.expenses;
+  const fields = EXPENSE_MONEY_FIELDS.reduce(
+    (sum, k) => sum + convert((e[k] as number) || 0, expenseCurrency(p, k), to, rates),
+    0
+  );
+  const india = convert(p.logistics.indiaTransportCost || 0, prodCurrency(p), to, rates);
+  return fields + india;
+}
 
 export interface OrderSummary {
   currency: CurrencyCode;
@@ -42,35 +92,48 @@ export interface OrderSummary {
   outstanding: number; // amount still payable = final landed cost − advance paid
 }
 
-export function computeOrderSummary(p: Product): OrderSummary {
+// `rates` is optional. When provided, every amount is normalised into the
+// PRODUCT currency (working.rateCurrency) before being summed — so fields entered
+// in different currencies add up correctly. When omitted (or null), convert() is
+// an identity and the function behaves exactly as before (raw single-currency
+// sums). The summary's figures are therefore all expressed in the product
+// currency; the view/bill then convert that single base into the display currency.
+export function computeOrderSummary(p: Product, rates: Rates | null = null): OrderSummary {
   const f = getFlow(p);
   const w = p.working;
   const e = p.expenses;
   const L = p.logistics;
+  const base = prodCurrency(p);
+  // Normalise an expense field from its own currency into the product base.
+  const ex = (field: ExpenseMoneyField) => convert((e[field] as number) || 0, expenseCurrency(p, field), base, rates);
+  // Normalise a payment amount from its own currency into the product base.
+  const pay = (field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance") =>
+    convert((w[field] as number) || 0, paymentCurrency(p, field), base, rates);
 
   const totalQty = w.moq || 0;
-  const goodsTotal = w.rateValue || 0;
-  const advancePaid = Math.min(w.advancePaid || 0, goodsTotal);
+  const goodsTotal = pay("rateValue");
+  const advancePaid = Math.min(pay("advancePaid"), goodsTotal);
   const goodsPending = Math.max(goodsTotal - advancePaid, 0);
 
   // Freight = itemised lines (ocean + destination charges + GST), falling back to
-  // the legacy single freight figure if no itemised values are present.
+  // the legacy single freight figure if no itemised values are present. Each line
+  // is converted from its own currency into the product base first.
   const freightItems =
-    (e.oceanFreight || 0) + (e.doCharge || 0) + (e.thcCharge || 0) +
-    (e.cfsCharge || 0) + (e.wgmtCharge || 0) + (e.gstCharge || 0);
-  const freight = freightItems > 0 ? freightItems : e.freightActual || 0;
-  const duty = e.dutyActual || 0;
-  const cha = e.chaCharges || 0;
+    ex("oceanFreight") + ex("doCharge") + ex("thcCharge") +
+    ex("cfsCharge") + ex("wgmtCharge") + ex("gstCharge");
+  const freight = freightItems > 0 ? freightItems : convert(e.freightActual || 0, base, base, rates);
+  const duty = ex("dutyActual");
+  const cha = ex("chaCharges");
   // Last-mile = the expenses field plus the India transport cost recorded on the
-  // Product Arrival step.
-  const lastMile = (e.lastMileCost || 0) + (L.indiaTransportCost || 0);
-  const other = e.otherExpense || 0;
+  // Product Arrival step (India transport is in the product currency).
+  const lastMile = ex("lastMileCost") + convert(L.indiaTransportCost || 0, base, base, rates);
+  const other = ex("otherExpense");
   const expensesTotal = freight + duty + cha + lastMile + other;
 
   const finalExpense = goodsTotal + expensesTotal;
   const finalPerUnit = totalQty > 0 ? finalExpense / totalQty : 0;
 
-  const sellingTotal = e.sellingPriceTotal || 0;
+  const sellingTotal = ex("sellingPriceTotal");
   const profit = sellingTotal - finalExpense;
   const profitPct = sellingTotal > 0 ? (profit / sellingTotal) * 100 : 0;
   const profitable = sellingTotal > 0 ? profit >= 0 : null;
@@ -79,8 +142,8 @@ export function computeOrderSummary(p: Product): OrderSummary {
   // amount still payable — the final landed cost minus everything paid so far
   // (the product advance plus the shipment advance).
   const arrived = !!L.handedToInventory;
-  const shipmentValue = w.shipmentValue || 0;
-  const shipmentAdvance = Math.min(w.shipmentAdvance || 0, shipmentValue);
+  const shipmentValue = pay("shipmentValue");
+  const shipmentAdvance = Math.min(pay("shipmentAdvance"), shipmentValue);
   const shipmentPending = Math.max(shipmentValue - shipmentAdvance, 0);
   const totalPaid = advancePaid + shipmentAdvance;
   const outstanding = Math.max(finalExpense - totalPaid, 0);

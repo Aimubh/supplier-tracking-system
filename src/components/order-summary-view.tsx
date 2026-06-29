@@ -19,8 +19,8 @@ import {
   FileDown,
   RefreshCw,
 } from "lucide-react";
-import { useStore, type Product, type Expenses, type Working, type Logistics, type CurrencyCode } from "@/lib/store";
-import { computeOrderSummary } from "@/lib/order-summary";
+import { useStore, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
+import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
 import { useFxRates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
@@ -47,7 +47,10 @@ export function OrderSummaryView() {
   // Convert an amount (in its source currency) into the chosen display currency.
   const toDisp = (amount: number, from: CurrencyCode) => convert(amount, from, show, fx.rates);
 
-  const rows = products.map((p) => ({ p, s: computeOrderSummary(p) }));
+  // computeOrderSummary normalises every per-field currency into each product's
+  // own product currency using live rates; toDisp then converts that base into
+  // the chosen display currency.
+  const rows = products.map((p) => ({ p, s: computeOrderSummary(p, fx.rates) }));
 
   // Portfolio totals — converted to the display currency per product source.
   const tot = rows.reduce(
@@ -288,8 +291,6 @@ function PnlSheet({
   const l = p.logistics;
   const prodCur = w.rateCurrency ?? "INR";
   const shipCur = w.shipmentCurrency ?? "INR";
-  const prodSym = CURRENCY_SYMBOL[prodCur];
-  const shipSym = CURRENCY_SYMBOL[shipCur];
 
   const setExpense = <K extends keyof Expenses>(key: K, value: Expenses[K]) =>
     patchProduct(p.id, "expenses", { ...e, [key]: value });
@@ -298,16 +299,25 @@ function PnlSheet({
   const setLogistics = <K extends keyof Logistics>(key: K, value: Logistics[K]) =>
     patchProduct(p.id, "logistics", { ...l, [key]: value });
 
-  // Derived figures in the display currency.
-  const goodsTotal = toDisp(w.rateValue || 0, prodCur);
-  const prodAdv = toDisp(Math.min(w.advancePaid || 0, w.rateValue || 0), prodCur);
-  const shipAdv = toDisp(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), shipCur);
-  const freightFields: (keyof Expenses)[] = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge"];
-  const otherFields: (keyof Expenses)[] = ["dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
-  const expSum =
-    [...freightFields, ...otherFields].reduce((s, k) => s + ((e[k] as number) || 0), 0) +
-    (l.indiaTransportCost || 0);
-  const expensesDisp = toDisp(expSum, prodCur);
+  // Per-field currency: resolve and update. Overrides live in expenses.fieldCurrency
+  // / working.paymentCurrency; clearing one back to the section currency just drops
+  // the key. Each setter writes a fresh map so the store auto-save fires.
+  const expCur = (k: ExpenseMoneyField) => expenseCurrency(p, k);
+  const setExpCur = (k: ExpenseMoneyField, c: CurrencyCode) =>
+    patchProduct(p.id, "expenses", { ...e, fieldCurrency: { ...(e.fieldCurrency ?? {}), [k]: c } });
+  const payCur = (k: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance") => paymentCurrency(p, k);
+  const setPayCur = (k: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance", c: CurrencyCode) =>
+    patchProduct(p.id, "working", { ...w, paymentCurrency: { ...(w.paymentCurrency ?? {}), [k]: c } });
+
+  // Derived figures in the display currency — each amount converted from its own
+  // resolved currency.
+  const goodsTotal = toDisp(w.rateValue || 0, payCur("rateValue"));
+  const prodAdv = toDisp(Math.min(w.advancePaid || 0, w.rateValue || 0), payCur("advancePaid"));
+  const shipAdv = toDisp(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), payCur("shipmentAdvance"));
+  const freightFields: ExpenseMoneyField[] = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge"];
+  const otherFields: ExpenseMoneyField[] = ["dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
+  // Total expenses in the display currency — convert each field from its own currency.
+  const expensesDisp = expensesIn(p, show, rates);
   const finalDisp = goodsTotal + expensesDisp;
   const perUnit = (w.moq || 0) > 0 ? finalDisp / (w.moq as number) : 0;
   const arrived = !!l.handedToInventory;
@@ -322,7 +332,7 @@ function PnlSheet({
     otherExpense: "Other", indiaTransport: "Port-to-warehouse transport",
   };
   const costLines: { label: string; amount: number }[] = [
-    ...[...freightFields, ...otherFields].map((k) => ({ label: COST_LABELS[k as string], amount: toDisp((e[k] as number) || 0, prodCur) })),
+    ...[...freightFields, ...otherFields].map((k) => ({ label: COST_LABELS[k as string], amount: toDisp((e[k] as number) || 0, expCur(k)) })),
     { label: COST_LABELS.indiaTransport, amount: toDisp(l.indiaTransportCost || 0, prodCur) },
   ].filter((x) => x.amount > 0);
 
@@ -360,26 +370,20 @@ function PnlSheet({
             </div>
           </div>
 
-          {/* Payments — editable, each in its own currency */}
+          {/* Payments — editable, each field in its own currency */}
           <div className="rounded-md border border-line bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="eyebrow">Product payment</p>
-              <CurrencyPill value={prodCur} onChange={(c) => setWorking("rateCurrency", c)} />
-            </div>
+            <p className="eyebrow mb-3">Product payment</p>
             <div className="grid grid-cols-2 gap-3">
-              <FieldMoney label="Total" sym={prodSym} value={w.rateValue} onChange={(v) => setWorking("rateValue", v)} />
-              <FieldMoney label="Advance paid" sym={prodSym} value={w.advancePaid} onChange={(v) => setWorking("advancePaid", v)} />
+              <FieldMoney label="Total" cur={payCur("rateValue")} onCur={(c) => setPayCur("rateValue", c)} value={w.rateValue} onChange={(v) => setWorking("rateValue", v)} />
+              <FieldMoney label="Advance paid" cur={payCur("advancePaid")} onCur={(c) => setPayCur("advancePaid", c)} value={w.advancePaid} onChange={(v) => setWorking("advancePaid", v)} />
             </div>
-            <p className="mt-1.5 text-[10.5px] text-muted">Freight &amp; other expenses are recorded in this currency.</p>
 
-            <div className="mb-3 mt-4 flex items-center justify-between">
-              <p className="eyebrow">Shipment payment</p>
-              <CurrencyPill value={shipCur} onChange={(c) => setWorking("shipmentCurrency", c)} />
-            </div>
+            <p className="eyebrow mb-3 mt-4">Shipment payment</p>
             <div className="grid grid-cols-2 gap-3">
-              <FieldMoney label="Total" sym={shipSym} value={w.shipmentValue} onChange={(v) => setWorking("shipmentValue", v)} />
-              <FieldMoney label="Advance paid" sym={shipSym} value={w.shipmentAdvance} onChange={(v) => setWorking("shipmentAdvance", v)} />
+              <FieldMoney label="Total" cur={payCur("shipmentValue")} onCur={(c) => setPayCur("shipmentValue", c)} value={w.shipmentValue} onChange={(v) => setWorking("shipmentValue", v)} />
+              <FieldMoney label="Advance paid" cur={payCur("shipmentAdvance")} onCur={(c) => setPayCur("shipmentAdvance", c)} value={w.shipmentAdvance} onChange={(v) => setWorking("shipmentAdvance", v)} />
             </div>
+            <p className="mt-2 text-[10.5px] text-muted">Each amount can be entered in its own currency; totals convert live.</p>
           </div>
 
           {/* Approvals (read-only status) */}
@@ -402,30 +406,24 @@ function PnlSheet({
         {/* Right: editable expenses + converted P&L */}
         <div className="space-y-4">
           <div className="rounded-md border border-line bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="eyebrow">Freight &amp; destination</p>
-              <CurrencyPill value={prodCur} onChange={(c) => setWorking("rateCurrency", c)} />
-            </div>
+            <p className="eyebrow mb-3">Freight &amp; destination</p>
             <div className="space-y-2.5">
               {freightFields.map((k) => (
-                <ExpenseInput key={k} sym={prodSym} label={FREIGHT_META[k].label} hint={FREIGHT_META[k].hint}
+                <ExpenseInput key={k} cur={expCur(k)} onCur={(c) => setExpCur(k, c)} label={FREIGHT_META[k].label} hint={FREIGHT_META[k].hint}
                   value={(e[k] as number) || 0} onChange={(v) => setExpense(k, v as never)} />
               ))}
             </div>
           </div>
 
           <div className="rounded-md border border-line bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="eyebrow">Other expenses</p>
-              <CurrencyPill value={prodCur} onChange={(c) => setWorking("rateCurrency", c)} />
-            </div>
+            <p className="eyebrow mb-3">Other expenses</p>
             <div className="space-y-2.5">
               {otherFields.map((k) => (
-                <ExpenseInput key={k} sym={prodSym} label={OTHER_META[k].label} hint={OTHER_META[k].hint}
+                <ExpenseInput key={k} cur={expCur(k)} onCur={(c) => setExpCur(k, c)} label={OTHER_META[k].label} hint={OTHER_META[k].hint}
                   value={(e[k] as number) || 0} onChange={(v) => setExpense(k, v as never)} />
               ))}
               <div className="border-t border-line pt-2.5">
-                <ExpenseInput sym={prodSym} label="Expected revenue" hint="total selling value"
+                <ExpenseInput cur={expCur("sellingPriceTotal")} onCur={(c) => setExpCur("sellingPriceTotal", c)} label="Expected revenue" hint="total selling value"
                   value={e.sellingPriceTotal || 0} onChange={(v) => setExpense("sellingPriceTotal", v as never)} />
               </div>
             </div>
@@ -481,23 +479,6 @@ function PnlSheet({
 
 // ---- small editable field helpers --------------------------------------------
 
-// Compact currency dropdown shown in section headers.
-function CurrencyPill({ value, onChange }: { value: CurrencyCode; onChange: (c: CurrencyCode) => void }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as CurrencyCode)}
-      onClick={(e) => e.stopPropagation()}
-      className="h-7 appearance-none rounded-sm border border-line bg-white px-2 text-[11px] font-semibold text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15"
-      title="Change currency for these amounts"
-    >
-      {CURRENCIES.map((c) => (
-        <option key={c} value={c}>{c}</option>
-      ))}
-    </select>
-  );
-}
-
 function FieldNum({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <label className="block">
@@ -508,14 +489,17 @@ function FieldNum({ label, value, onChange }: { label: string; value: number; on
   );
 }
 
-function FieldMoney({ label, sym, value, onChange }: { label: string; sym: string; value: number; onChange: (v: number) => void }) {
+function FieldMoney({ label, cur, onCur, value, onChange }: { label: string; cur: CurrencyCode; onCur: (c: CurrencyCode) => void; value: number; onChange: (v: number) => void }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[12px] font-medium text-body">{label}</span>
       <div className="relative">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-muted">{sym}</span>
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-muted">{CURRENCY_SYMBOL[cur]}</span>
         <input type="number" value={value || ""} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} placeholder="0"
-          className="figure h-10 w-full rounded-sm border border-line bg-white pl-7 pr-3 text-[14px] text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15" />
+          className="figure h-10 w-full rounded-sm border border-line bg-white pl-7 pr-[68px] text-[14px] text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15" />
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+          <CurrencyMini value={cur} onChange={onCur} />
+        </span>
       </div>
     </label>
   );
@@ -543,7 +527,7 @@ function FieldSelect({ label, value, options, onChange }: { label: string; value
   );
 }
 
-function ExpenseInput({ sym, label, hint, value, onChange }: { sym: string; label: string; hint: string; value: number; onChange: (v: number) => void }) {
+function ExpenseInput({ cur, onCur, label, hint, value, onChange }: { cur: CurrencyCode; onCur: (c: CurrencyCode) => void; label: string; hint: string; value: number; onChange: (v: number) => void }) {
   return (
     <label className="flex items-center gap-3">
       <span className="w-28 shrink-0">
@@ -551,11 +535,31 @@ function ExpenseInput({ sym, label, hint, value, onChange }: { sym: string; labe
         <span className="block text-[10.5px] text-muted">{hint}</span>
       </span>
       <div className="relative flex-1">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-muted">{sym}</span>
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-muted">{CURRENCY_SYMBOL[cur]}</span>
         <input type="number" value={value || ""} onChange={(ev) => onChange(parseFloat(ev.target.value) || 0)} placeholder="0"
-          className="figure h-10 w-full rounded-sm border border-line bg-white pl-7 pr-3 text-[14px] text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15" />
+          className="figure h-10 w-full rounded-sm border border-line bg-white pl-7 pr-[68px] text-[14px] text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15" />
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+          <CurrencyMini value={cur} onChange={onCur} />
+        </span>
       </div>
     </label>
+  );
+}
+
+// Compact in-field currency selector (INR/USD/CNY) sitting inside a money input.
+function CurrencyMini({ value, onChange }: { value: CurrencyCode; onChange: (c: CurrencyCode) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as CurrencyCode)}
+      onClick={(e) => e.stopPropagation()}
+      title="Currency for this amount"
+      className="h-7 cursor-pointer appearance-none rounded-sm border border-line bg-surface px-1.5 text-[10.5px] font-semibold text-ink focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15"
+    >
+      {CURRENCIES.map((c) => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
   );
 }
 

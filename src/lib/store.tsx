@@ -64,12 +64,16 @@ export interface Working {
   rate: Incoterm; // FOB / CIF / EXW / FCA
   // Product payment — the goods deal.
   rateValue: number; // agreed TOTAL product amount at that incoterm
-  rateCurrency: CurrencyCode; // currency the product amount is entered in
+  rateCurrency: CurrencyCode; // currency the product amount is entered in (section default)
   advancePaid: number; // advance already paid toward the product total
   // Shipment payment — freight / forwarder, tracked separately (own currency).
   shipmentValue: number; // agreed TOTAL shipment amount
-  shipmentCurrency: CurrencyCode; // currency for the shipment amount
+  shipmentCurrency: CurrencyCode; // currency for the shipment amount (section default)
   shipmentAdvance: number; // advance already paid toward the shipment total
+  // Optional per-field currency overrides for the four payment amounts. When a
+  // key is absent the amount falls back to its section currency (rate* / shipment*).
+  // Keys: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance".
+  paymentCurrency?: Partial<Record<"rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance", CurrencyCode>>;
   moldRequired: boolean;
   packagingDone: boolean; // derived: true once the logo/packaging is APPROVED
   // Packaging / logo design review: upload proofs, then approve or reject.
@@ -315,7 +319,16 @@ export interface Expenses {
   otherExpense: number; // misc (inspection, insurance, bank, etc.)
   sellingPriceTotal: number; // expected total revenue (for profit/loss)
   notes: string;
+  // Optional per-field currency overrides for the itemised cost lines above.
+  // When a field key is absent the amount is taken to be in the product currency
+  // (working.rateCurrency), preserving the original single-currency behaviour.
+  fieldCurrency?: Partial<Record<ExpenseMoneyField, CurrencyCode>>;
 }
+
+// The money-bearing expense fields that may carry a per-field currency override.
+export type ExpenseMoneyField =
+  | "oceanFreight" | "doCharge" | "thcCharge" | "cfsCharge" | "wgmtCharge" | "gstCharge"
+  | "dutyActual" | "chaCharges" | "lastMileCost" | "otherExpense" | "sellingPriceTotal";
 
 // Per-SKU sourcing & margin model (Pre-Order). Mirrors the LAZERECOM workbook:
 // editable assumptions + per-SKU inputs; the verdict/landed cost are computed by

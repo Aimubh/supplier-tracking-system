@@ -2,8 +2,8 @@
 // a new window for the browser's "Save as PDF" (print) flow. Kept independent of
 // the app's CSS so the printed page is predictable.
 
-import type { Product, CurrencyCode } from "./store";
-import { computeOrderSummary } from "./order-summary";
+import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
+import { computeOrderSummary, expenseCurrency } from "./order-summary";
 import { convert, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
@@ -18,16 +18,20 @@ function esc(s: string): string {
 // in that currency (matching the Order Summary "Show in" filter). Product amounts
 // are in the product currency; shipment amounts in the shipment currency.
 export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyCode, rates?: Rates | null) {
-  const s = computeOrderSummary(p);
+  const r = rates ?? null;
+  // Summary figures are normalised into the product currency (using rates), then
+  // converted once into the display currency below.
+  const s = computeOrderSummary(p, r);
   const prodCur = p.working.rateCurrency ?? "INR";
-  const shipCur = p.working.shipmentCurrency ?? "INR";
   const disp = display ?? prodCur;
   const sym = SYM[disp];
   const L = p.logistics;
   const e = p.expenses;
-  // Product-side figures convert from product currency; shipment from shipment.
-  const cP = (n: number) => convert(n, prodCur, disp, rates ?? null);
-  const cS = (n: number) => convert(n, shipCur, disp, rates ?? null);
+  // computeOrderSummary already expressed every aggregate in the product currency,
+  // so the display conversion is a single product→display step.
+  const cP = (n: number) => convert(n, prodCur, disp, r);
+  // Convert a single expense field from ITS OWN currency straight to display.
+  const cField = (field: ExpenseMoneyField, n: number) => convert(n, expenseCurrency(p, field), disp, r);
   const money = (n: number) => `${sym}${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
   // Converted aggregates in the display currency.
@@ -35,31 +39,32 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
   const dExpenses = cP(s.expensesTotal);
   const dFinal = dGoods + dExpenses;
   const dProdAdv = cP(s.advancePaid);
-  const dShipAdv = cS(s.shipmentAdvance);
+  const dShipAdv = cP(s.shipmentAdvance); // already in product currency via summary
   const dTotalPaid = dProdAdv + dShipAdv;
   const dOutstanding = Math.max(dFinal - dTotalPaid, 0);
   const dPerUnit = s.totalQty > 0 ? dFinal / s.totalQty : 0;
 
-  // Itemised charge rows (skip zero lines to keep the bill tidy).
+  // Itemised charge rows (skip zero lines to keep the bill tidy). Each row is
+  // converted from its own field currency; India transport is in product currency.
   const chargeRows: [string, number][] = [
-    ["Ocean freight (POL → POD)", e.oceanFreight || 0],
-    ["DO charge", e.doCharge || 0],
-    ["THC — terminal handling", e.thcCharge || 0],
-    ["CFS — freight station", e.cfsCharge || 0],
-    ["WGMT — weighment", e.wgmtCharge || 0],
-    ["GST on charges", e.gstCharge || 0],
-    ["Customs duty + IGST", e.dutyActual || 0],
-    ["CHA charges", e.chaCharges || 0],
-    ["Last-mile transport", e.lastMileCost || 0],
-    ["Port-to-warehouse transport", p.logistics.indiaTransportCost || 0],
-    ["Other", e.otherExpense || 0],
+    ["Ocean freight (POL → POD)", cField("oceanFreight", e.oceanFreight || 0)],
+    ["DO charge", cField("doCharge", e.doCharge || 0)],
+    ["THC — terminal handling", cField("thcCharge", e.thcCharge || 0)],
+    ["CFS — freight station", cField("cfsCharge", e.cfsCharge || 0)],
+    ["WGMT — weighment", cField("wgmtCharge", e.wgmtCharge || 0)],
+    ["GST on charges", cField("gstCharge", e.gstCharge || 0)],
+    ["Customs duty + IGST", cField("dutyActual", e.dutyActual || 0)],
+    ["CHA charges", cField("chaCharges", e.chaCharges || 0)],
+    ["Last-mile transport", cField("lastMileCost", e.lastMileCost || 0)],
+    ["Port-to-warehouse transport", cP(p.logistics.indiaTransportCost || 0)],
+    ["Other", cField("otherExpense", e.otherExpense || 0)],
   ];
   const chargesHtml =
     chargeRows
       .filter(([, v]) => v > 0)
       .map(
         ([label, v]) =>
-          `<tr><td>${esc(label)}</td><td class="num">${esc(money(cP(v)))}</td></tr>`
+          `<tr><td>${esc(label)}</td><td class="num">${esc(money(v))}</td></tr>`
       )
       .join("") || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
 
