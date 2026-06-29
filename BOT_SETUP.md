@@ -73,7 +73,33 @@ The bot replies with the ranked top-5.
   came from.
 
 ### Image-match score
-The 60% "image" weight uses each supplier's **position** in Vendex's image-ranked
-results (best match = highest). If Vendex later returns a real per-supplier
-similarity number (a `similarity` / `imageScore` / `matchScore` field), the bridge
-picks it up automatically and uses that instead — no code change needed.
+The 60% "image" weight uses each result's **position** in the image search (best
+match = highest). With SerpAPI Google Lens this is Google's own visual-similarity
+rank — a genuine image signal.
+
+---
+
+## Real data — Google Lens via SerpAPI
+
+The bot's real supplier data comes from **SerpAPI's Google Lens** reverse-image
+search. It needs no separate scraper service — the search runs inside this app.
+
+**Search priority** (in `src/lib/vendex.ts`):
+1. **SerpAPI Google Lens** — used when `SERPAPI_KEY` is set. ← real data
+2. **Vendex** — used if `VENDEX_API_URL` is reachable (legacy/optional).
+3. **Mock** — fallback so the bot never goes silent.
+
+### Turn on real data
+1. Create a key at **serpapi.com** (free tier = 100 searches/month).
+2. Add env vars (locally in `.env`, and in **Vercel → Settings → Environment Variables**):
+   ```env
+   SERPAPI_KEY="<your serpapi key>"
+   BOT_MOCK_SUPPLIERS="0"
+   ```
+3. **Redeploy** on Vercel so the new vars take effect.
+4. Tag the bot with a photo + `#prize` — it now returns real Google Lens matches.
+
+Notes:
+- Lens prices are **retail** (what shops sell for), not Alibaba wholesale FOB — the
+  bot says so in its reply. Click the supplier links to find the FOB source.
+- Non-USD prices are converted to USD for fair price ranking.

@@ -17,6 +17,11 @@ const VENDEX_TOKEN = process.env.VENDEX_API_TOKEN ?? "";
 const POLL_TIMEOUT_MS = 90_000;
 const POLL_EVERY_MS = 2_500;
 
+// SerpAPI Google Lens — direct reverse-image search, no separate scraper service.
+const SERPAPI_KEY = process.env.SERPAPI_KEY ?? "";
+// USD-per-unit conversion for non-USD Lens prices, so price ranking is comparable.
+const FX_TO_USD: Record<string, number> = { USD: 1, "$": 1, INR: 0.012, "₹": 0.012, EUR: 1.08, "€": 1.08, GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, AED: 0.27 };
+
 function authHeaders(): Record<string, string> {
   return VENDEX_TOKEN
     ? { Authorization: `Bearer ${VENDEX_TOKEN}`, "Content-Type": "application/json" }
@@ -90,13 +95,89 @@ function toCandidate(s: Record<string, unknown>): RankCandidate {
   };
 }
 
+// --- SerpAPI Google Lens (direct reverse-image search) -----------------------
+// Maps a Lens visual_matches row into a RankCandidate. The row's `position` is
+// Google's own visual-similarity rank, which becomes the image-match signal.
+function lensToCandidate(m: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const price = m.price as { extracted_value?: number; currency?: string } | undefined;
+  let priceUsd: number | null = null;
+  if (price && typeof price.extracted_value === "number") {
+    const cur = String(price.currency ?? "USD");
+    const rate = FX_TO_USD[cur] ?? 1;
+    priceUsd = price.extracted_value * rate;
+  }
+  // position is 1-based and best-first; convert to a 0–1 image score (1 = best).
+  const pos = typeof m.position === "number" ? m.position : index + 1;
+  const imageScore = total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1;
+  return {
+    name: String(m.source ?? m.title ?? "Source"),
+    title: String(m.title ?? ""),
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews: typeof m.reviews === "number" ? m.reviews : null,
+    rating: typeof m.rating === "number" ? m.rating : null,
+    country: "",
+    url: String(m.link ?? ""),
+    image: String(m.thumbnail ?? m.image ?? ""),
+    platform: "google_lens",
+    imageScore,
+  };
+}
+
+// Reverse-image search via SerpAPI Google Lens. Returns visual matches with
+// prices/ratings/reviews. Requires SERPAPI_KEY and a public image URL.
+async function searchViaSerpApi(imageUrl: string): Promise<RankCandidate[]> {
+  const params = new URLSearchParams({
+    engine: "google_lens",
+    url: imageUrl,
+    type: "visual_matches",
+    api_key: SERPAPI_KEY,
+    hl: "en",
+  });
+  const res = await fetch(`https://serpapi.com/search?${params.toString()}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(`SerpAPI: ${data.error}`);
+  const matches: Record<string, unknown>[] = Array.isArray(data.visual_matches) ? data.visual_matches : [];
+  // Keep matches that have at least a price OR look like a shopping result.
+  const usable = matches.slice(0, 30);
+  return usable.map((m, i) => lensToCandidate(m, i, usable.length));
+}
+
 // Run the full image → suppliers pipeline. Never throws; returns a result object.
+// Priority: SerpAPI Lens (if SERPAPI_KEY) → Vendex (if reachable) → mock.
 export async function searchSuppliersByImage(
   bytes: Uint8Array,
   mime: string
 ): Promise<SupplierSearchResult> {
   if (mockForced()) {
     return { ok: true, mock: true, suppliers: mockSuppliers(), note: "Mock data (BOT_MOCK_SUPPLIERS=1)." };
+  }
+
+  // PRIMARY: SerpAPI Google Lens — real reverse-image search, no Vendex needed.
+  if (SERPAPI_KEY) {
+    try {
+      const imageUrl = await hostImage(bytes, mime);
+      const suppliers = await searchViaSerpApi(imageUrl);
+      if (suppliers.length > 0) {
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: "Prices are retail (Google Lens). Alibaba wholesale FOB will be lower — check the links.",
+        };
+      }
+      // No matches → fall through to Vendex/mock below.
+    } catch (e) {
+      // Lens failed (quota/network) → try Vendex, else mock. Don't go silent.
+      const msg = e instanceof Error ? e.message : "lens failed";
+      if (!process.env.VENDEX_API_URL || mockForced()) {
+        return { ok: true, mock: true, suppliers: mockSuppliers(), note: `Lens search unavailable (${msg}) — showing sample data.` };
+      }
+      // else fall through to the Vendex attempt
+    }
   }
 
   try {
