@@ -840,10 +840,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!id || fullLoads.current.has(id)) return;
     fullLoads.current.add(id);
     try {
-      const full = await apiGet<Partial<Product>>(`/api/products/${id}`);
-      const merged = migrateProduct(full as Partial<Product>);
-      merged._light = false;
-      setProducts((prev) => prev.map((p) => (p.id === id ? merged : p)));
+      const res = await fetch(`/api/products/${id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const full = migrateProduct((await res.json()) as Partial<Product>);
+      // Merge ONLY the media (previously-stripped) fields from the server into the
+      // CURRENT local product, so any edits the user made before the full load
+      // finished are preserved (don't overwrite the whole record). Then clear the
+      // light flag so autosave is allowed.
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== id) return p;
+          if (!p._light) return p; // already full (or edited to full) — leave as is
+          return {
+            ...p,
+            _light: false,
+            _hasPhoto: undefined,
+            working: {
+              ...p.working,
+              productMedia: full.working.productMedia,
+              sampleMedia: full.working.sampleMedia,
+              packagingMedia: full.working.packagingMedia,
+              productImage: full.working.productImage,
+              sampleImage: full.working.sampleImage,
+            },
+            logistics: { ...p.logistics, docImages: full.logistics.docImages },
+            sourcing: full.sourcing ?? p.sourcing,
+          };
+        })
+      );
     } catch {
       fullLoads.current.delete(id); // allow a retry on failure
     }
@@ -883,7 +907,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       prev.map((p) => {
         if (p.id !== id) return p;
         const next = { ...p, filed: true, filedAt: Date.now() };
-        apiSend("PATCH", `/api/products/${id}`, next);
+        // Never PATCH a _light product (its media is stripped → would wipe the DB).
+        // Toggle `filed` directly on the server instead; the full media is untouched.
+        if (p._light) {
+          apiSend("PATCH", `/api/products/${id}`, { id, filed: true, filedAt: next.filedAt });
+        } else {
+          apiSend("PATCH", `/api/products/${id}`, stripRuntimeFlags(next));
+        }
         return next;
       })
     );
@@ -896,12 +926,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       prev.map((p) => {
         if (p.id !== id) return p;
         const next = { ...p, filed: false, filedAt: null };
-        apiSend("PATCH", `/api/products/${id}`, next);
+        // Flags-only PATCH for light products (don't wipe stripped media).
+        if (p._light) {
+          apiSend("PATCH", `/api/products/${id}`, { id, filed: false, filedAt: null });
+        } else {
+          apiSend("PATCH", `/api/products/${id}`, stripRuntimeFlags(next));
+        }
         return next;
       })
     );
-    setActiveIdState(id);
-  }, []);
+    setActiveId(id); // makes it active → triggers ensureFull to load full media
+  }, [setActiveId]);
 
   const patch = useCallback(
     <K extends keyof Product>(key: K, value: Product[K]) => {

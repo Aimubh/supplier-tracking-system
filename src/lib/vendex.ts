@@ -25,11 +25,20 @@ const TMAPI_TOKEN = process.env.TMAPI_TOKEN ?? "";
 const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.io";
 // USD-per-unit conversion so prices in different currencies rank comparably.
 // CNY matters most here (1688 quotes in ¥).
-const FX_TO_USD: Record<string, number> = { USD: 1, "$": 1, INR: 0.012, "₹": 0.012, EUR: 1.08, "€": 1.08, GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, RMB: 0.14, AED: 0.27 };
+const FX_TO_USD: Record<string, number> = {
+  USD: 1, "$": 1, INR: 0.012, "₹": 0.012, "Rs": 0.012, EUR: 1.08, "€": 1.08,
+  GBP: 1.27, "£": 1.27, CNY: 0.14, "¥": 0.14, RMB: 0.14, AED: 0.27,
+  CAD: 0.73, "CA$": 0.73, AUD: 0.66, "A$": 0.66, JPY: 0.0064, SGD: 0.74, HKD: 0.13,
+};
 
+// Convert to USD. If the currency is UNKNOWN, return null rather than silently
+// assuming USD — a mislabeled price is worse than no price (it would render a
+// confidently-wrong INR figure and duty). Callers show "price n/a" for null.
 function toUsd(value: number | null | undefined, currency: string | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const rate = FX_TO_USD[String(currency ?? "USD")] ?? 1;
+  const cur = String(currency ?? "USD").trim();
+  const rate = FX_TO_USD[cur];
+  if (rate === undefined) return null; // unknown currency → don't guess
   return value * rate;
 }
 

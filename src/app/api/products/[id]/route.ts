@@ -30,6 +30,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (denied) return denied;
   try {
     const body = await req.json();
+    // FLAGS-ONLY update: when the body carries just the filed/filedAt toggle (used
+    // for file/reopen on light, media-stripped products), update ONLY those columns
+    // — never rebuild the JSON slices, which would wipe media with defaults.
+    const keys = Object.keys(body).filter((k) => k !== "id");
+    const isFlagsOnly = keys.length > 0 && keys.every((k) => k === "filed" || k === "filedAt");
+    if (isFlagsOnly) {
+      const data: Record<string, unknown> = {};
+      if (typeof body.filed === "boolean") data.filed = body.filed;
+      if ("filedAt" in body) data.filedAt = body.filedAt ? new Date(body.filedAt as number) : null;
+      const updated = await prisma.product.update({ where: { id: params.id }, data });
+      return NextResponse.json(updated);
+    }
     const updated = await prisma.product.update({
       where: { id: params.id },
       data: productToRow(body),

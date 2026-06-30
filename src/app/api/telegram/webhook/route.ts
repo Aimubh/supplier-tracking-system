@@ -136,8 +136,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true }); // ack malformed updates; don't retry-loop
   }
 
+  // Handle the update inside a try/catch that ALWAYS returns 200 — any unhandled
+  // throw would make Telegram redeliver the same update repeatedly (a retry storm
+  // re-running the ~60-90s image search). We ack first, act second.
+  try {
   const msg = update.message;
-  // Always 200 so Telegram doesn't redeliver; we just don't act on non-photo msgs.
   if (!msg?.chat?.id) return NextResponse.json({ ok: true });
   const chatId = String(msg.chat.id);
   const caption = msg.caption ?? msg.text ?? "";
@@ -205,4 +208,8 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ ok: true });
+  } catch {
+    // Never 500 to Telegram — that triggers redelivery. Swallow + ack.
+    return NextResponse.json({ ok: true });
+  }
 }
