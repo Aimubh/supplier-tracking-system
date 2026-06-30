@@ -1,0 +1,13 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Secrets — never commit real keys
+.env
+
+# Runtime artifacts
+downloads/
+frames/
+*.log
