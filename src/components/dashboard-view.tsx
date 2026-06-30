@@ -56,6 +56,28 @@ function PhasePill({ tab, state }: { tab: PhaseKey; state: PhaseState }) {
 
 const CUR_SYM: Record<string, string> = { USD: "$", INR: "₹", CNY: "¥" };
 
+// Small product thumbnail for the dashboard rows — the first product photo
+// (from the media gallery or the legacy single image), or a placeholder icon.
+function ProductThumb({ p }: { p: Product }) {
+  const media = p.working.productMedia ?? [];
+  const img = media.find((m) => m.kind === "image")?.data || p.working.productImage;
+  if (img) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={img}
+        alt={p.name}
+        className="h-9 w-9 shrink-0 rounded-md border border-line object-cover"
+      />
+    );
+  }
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-line-strong">
+      <ImageIcon className="h-4 w-4" />
+    </span>
+  );
+}
+
 // Compact dropdown for the dashboard filter bar.
 function FilterSelect({
   value,
@@ -411,16 +433,22 @@ function ProductRow({
 
         {/* Product */}
         <td className="px-3 py-3">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[14px] font-medium text-ink">{p.name}</span>
-            {f.percent === 100 && <CheckCircle2 className="h-4 w-4 shrink-0 text-go" />}
-            {p.filed && (
-              <span className="figure shrink-0 rounded bg-surface px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted ring-1 ring-inset ring-line">
-                filed
-              </span>
-            )}
+          <div className="flex items-center gap-2.5">
+            {/* Thumbnail — first product photo, or a placeholder */}
+            <ProductThumb p={p} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[14px] font-medium text-ink">{p.name}</span>
+                {f.percent === 100 && <CheckCircle2 className="h-4 w-4 shrink-0 text-go" />}
+                {p.filed && (
+                  <span className="figure shrink-0 rounded bg-surface px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted ring-1 ring-inset ring-line">
+                    filed
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-[11.5px] text-muted">{f.stageLabel}</p>
+            </div>
           </div>
-          <p className="mt-0.5 truncate text-[11.5px] text-muted">{f.stageLabel}</p>
         </td>
 
         {/* Category */}
