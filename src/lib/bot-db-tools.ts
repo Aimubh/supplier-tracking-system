@@ -131,16 +131,23 @@ export async function pipelineOverview() {
 // Compact, READ-ONLY snapshot of ALL active products + manufacturers, sized to
 // fit in an LLM context for one-shot Q&A. Strips base64/media; keeps the facts a
 // question might need. Safe: pure reads, no raw SQL, no secrets.
+// Cap how many products/manufacturers go into the AI context, so a large catalog
+// can't blow up Gemini token cost or latency. Most recent first.
+const QA_PRODUCT_CAP = 200;
+const QA_MANUFACTURER_CAP = 200;
+
 export async function dataSummary() {
-  const [prodRows, manRows] = await Promise.all([
-    prisma.product.findMany({ where: { filed: false }, select: PRODUCT_SELECT, orderBy: { createdAt: "desc" } }) as Promise<RawProduct[]>,
+  const [prodRows, manRows, totalProducts] = await Promise.all([
+    prisma.product.findMany({ where: { filed: false }, select: PRODUCT_SELECT, orderBy: { createdAt: "desc" }, take: QA_PRODUCT_CAP }) as Promise<RawProduct[]>,
     prisma.manufacturer.findMany({
       select: {
         id: true, name: true, type: true, verification: true, city: true,
         productLines: true, repName: true, repNumber: true, website: true, moq: true, rating: true,
       },
       orderBy: { name: "asc" },
+      take: QA_MANUFACTURER_CAP,
     }),
+    prisma.product.count({ where: { filed: false } }),
   ]);
 
   const products = prodRows.map((p) => {
@@ -168,7 +175,8 @@ export async function dataSummary() {
 
   return {
     generatedAt: new Date().toISOString().slice(0, 10),
-    activeProductCount: products.length,
+    activeProductCount: totalProducts,
+    showingMostRecent: products.length < totalProducts ? products.length : undefined,
     products,
     manufacturerCount: manRows.length,
     manufacturers: manRows,

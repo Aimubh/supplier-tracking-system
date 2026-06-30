@@ -99,15 +99,19 @@ export function QrGeneratorView() {
     if (!qrDataUrl) return;
     const w = window.open("", "_blank", "width=480,height=640");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><title>${productName} — QR Label</title>
+    // Escape user-entered text before interpolating into the print HTML (XSS).
+    const esc = (s: string) =>
+      String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+    const meta = `${esc(supplierName)}${supplierState ? " · " + esc(supplierState) : ""} · MOQ ${moq} · ${rate} ${esc(rateCurrency)}`;
+    w.document.write(`<!doctype html><html><head><title>${esc(productName)} — QR Label</title>
       <style>body{font-family:-apple-system,Segoe UI,Arial,sans-serif;text-align:center;padding:32px;color:#15130e}
       .logo{font-weight:800;font-size:26px;letter-spacing:-1px}.logo small{display:block;font-size:11px;letter-spacing:6px;font-weight:600;margin-top:2px}
       img{width:280px;height:280px;margin:18px auto}.name{font-size:18px;font-weight:700;margin-top:8px}
       .meta{font-size:12px;color:#555;margin-top:4px}</style></head><body>
       <div class="logo">Lazer<small>BELIEVE</small></div>
       <img src="${qrDataUrl}" alt="QR"/>
-      <div class="name">${productName}</div>
-      <div class="meta">${supplierName}${supplierState ? " · " + supplierState : ""} · MOQ ${moq} · ${rate} ${rateCurrency}</div>
+      <div class="name">${esc(productName)}</div>
+      <div class="meta">${meta}</div>
       <script>window.onload=()=>setTimeout(()=>window.print(),300)</script></body></html>`);
     w.document.close();
   }
