@@ -197,10 +197,16 @@ export function Sidebar() {
             <Users className={clsx("h-4 w-4", pathname === "/users" ? "text-white" : "text-muted")} />
             Users &amp; access
           </Link>
-          <button className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] text-body transition hover:bg-surface hover:text-ink">
-            <Settings className="h-4 w-4 text-muted" />
-            Rate tables
-          </button>
+          <Link
+            href="/settings"
+            className={clsx(
+              "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition",
+              pathname === "/settings" ? "bg-ink text-white" : "text-body hover:bg-surface hover:text-ink"
+            )}
+          >
+            <Settings className={clsx("h-4 w-4", pathname === "/settings" ? "text-white" : "text-muted")} />
+            Settings
+          </Link>
         </div>
       )}
 
