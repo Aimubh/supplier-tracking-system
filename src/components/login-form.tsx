@@ -7,13 +7,6 @@ import { Eye, EyeOff, Loader2, ArrowRight, Check } from "lucide-react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 
-// Seeded admin login, for convenience (the "Fill" button). Real verification
-// happens server-side against the DB via NextAuth.
-const DEFAULT_ADMIN = {
-  email: "admin@gmail.com",
-  password: "admin@123",
-};
-
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -169,27 +162,6 @@ export function LoginForm() {
           </>
         )}
       </button>
-
-      {/* Demo credentials */}
-      <div className="flex items-center justify-between rounded-md border border-dashed border-line bg-surface px-3 py-2.5">
-        <div className="leading-tight">
-          <p className="eyebrow">Demo admin</p>
-          <p className="figure mt-1 text-[11px] text-muted">
-            {DEFAULT_ADMIN.email} · {DEFAULT_ADMIN.password}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEmail(DEFAULT_ADMIN.email);
-            setPassword(DEFAULT_ADMIN.password);
-            setError(null);
-          }}
-          className="rounded-md border border-line bg-white px-2.5 py-1 text-[12px] font-medium text-ink transition hover:bg-surface"
-        >
-          Fill
-        </button>
-      </div>
     </form>
   );
 }
