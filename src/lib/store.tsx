@@ -386,6 +386,11 @@ export interface Product {
   // Set when the product was created via the QR Generator (sample already in
   // hand → Pre-Order skipped). Optional so existing products stay valid.
   qrGen?: QrGen;
+  // Runtime-only flags from the light list (NOT persisted). _light = media was
+  // stripped for the list payload (load the full record before editing/saving);
+  // _hasPhoto = a product image exists on the server (loads on open).
+  _light?: boolean;
+  _hasPhoto?: boolean;
 }
 
 // Details captured by the QR Generator tab. These are encoded into the QR code
@@ -615,6 +620,15 @@ export function blankManufacturer(name = ""): Manufacturer {
 // Deep-merge a stored product onto a fresh blank so any newly-added fields
 // (top-level or one level of nested objects) get sensible defaults. Guards
 // against undefined nested values like `logistics.docImages` on old records.
+// Strip runtime-only flags (_light/_thumb) before persisting, so they never
+// land in the DB JSON.
+function stripRuntimeFlags(p: Product): Product {
+  const { _light, _hasPhoto, ...rest } = p as Product & { _light?: boolean; _hasPhoto?: boolean };
+  void _light;
+  void _hasPhoto;
+  return rest as Product;
+}
+
 function migrateProduct(stored: Partial<Product> | undefined): Product {
   const base = blankProduct(stored?.name ?? "Untitled product");
   if (!stored) return base;
@@ -725,6 +739,9 @@ interface StoreShape {
   activeId: string | null;
   active: Product | null;
   setActiveId: (id: string) => void;
+  // Lazily load a product's full media (the list is loaded light). Safe to call
+  // whenever a product is opened/viewed; idempotent.
+  ensureFull: (id: string) => void;
   addProduct: (name: string) => void;
   // Add a fully-built product (e.g. from the QR Generator, which pre-fills it and
   // skips Pre-Order). Returns the new product id.
@@ -788,13 +805,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const saveProductDebounced = useDebouncedSaver();
   const saveManufacturerDebounced = useDebouncedSaver();
 
-  // Load from the API once on mount.
+  // Load from the API once on mount. Use the LIGHT list (media stripped) so the
+  // payload stays small no matter how many products exist; full media for any one
+  // product is fetched lazily by ensureFull() when it's opened.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const [prods, mfrs] = await Promise.all([
-          apiGet<Partial<Product>>("/api/products"),
+          apiGet<Partial<Product>>("/api/products?light=1"),
           apiGet<Manufacturer>("/api/manufacturers"),
         ]);
         if (cancelled) return;
@@ -813,7 +832,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const setActiveId = useCallback((id: string) => setActiveIdState(id), []);
+  // Lazily replace a light product with its FULL record (media included). Called
+  // when a product is opened/activated. Idempotent: no-op if already full or in
+  // flight. Marks the product non-light so autosave is allowed afterwards.
+  const fullLoads = useRef<Set<string>>(new Set());
+  const ensureFull = useCallback(async (id: string) => {
+    if (!id || fullLoads.current.has(id)) return;
+    fullLoads.current.add(id);
+    try {
+      const full = await apiGet<Partial<Product>>(`/api/products/${id}`);
+      const merged = migrateProduct(full as Partial<Product>);
+      merged._light = false;
+      setProducts((prev) => prev.map((p) => (p.id === id ? merged : p)));
+    } catch {
+      fullLoads.current.delete(id); // allow a retry on failure
+    }
+  }, []);
+
+  const setActiveId = useCallback((id: string) => {
+    setActiveIdState(id);
+    void ensureFull(id);
+  }, [ensureFull]);
 
   const addProduct = useCallback((name: string) => {
     const p = blankProduct(name || "Untitled product");
@@ -870,12 +909,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         prev.map((p) => {
           if (p.id !== activeId) return p;
           const next = { ...p, [key]: value };
-          saveProductDebounced(`/api/products/${p.id}`, next);
+          // Don't autosave while media is still stripped (_light) — that would
+          // persist empty media. ensureFull() (triggered on open) fills it first.
+          if (p._light) {
+            void ensureFull(p.id);
+          } else {
+            saveProductDebounced(`/api/products/${p.id}`, stripRuntimeFlags(next));
+          }
           return next;
         })
       );
     },
-    [activeId, saveProductDebounced]
+    [activeId, saveProductDebounced, ensureFull]
   );
 
   const patchProduct = useCallback(
@@ -884,12 +929,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         prev.map((p) => {
           if (p.id !== id) return p;
           const next = { ...p, [key]: value };
-          saveProductDebounced(`/api/products/${p.id}`, next);
+          if (p._light) {
+            void ensureFull(p.id); // load full media before any save
+          } else {
+            saveProductDebounced(`/api/products/${p.id}`, stripRuntimeFlags(next));
+          }
           return next;
         })
       );
     },
-    [saveProductDebounced]
+    [saveProductDebounced, ensureFull]
   );
 
   const addManufacturer = useCallback(() => {
@@ -928,6 +977,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     activeId,
     active,
     setActiveId,
+    ensureFull: (id: string) => void ensureFull(id),
     addProduct,
     addProductFull,
     removeProduct,

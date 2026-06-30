@@ -60,7 +60,8 @@ const CUR_SYM: Record<string, string> = { USD: "$", INR: "₹", CNY: "¥" };
 // (from the media gallery or the legacy single image), or a placeholder icon.
 function ProductThumb({ p }: { p: Product }) {
   const media = p.working.productMedia ?? [];
-  const img = media.find((m) => m.kind === "image")?.data || p.working.productImage;
+  // Real image bytes are only present once the full record is loaded (on open).
+  const img = media.find((m) => m.kind === "image" && m.data)?.data || p.working.productImage;
   if (img) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -71,8 +72,13 @@ function ProductThumb({ p }: { p: Product }) {
       />
     );
   }
+  // No bytes loaded yet — placeholder. A filled icon hints a photo exists on the
+  // server (it loads when the row is opened).
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-line-strong">
+    <span className={clsx(
+      "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line",
+      p._hasPhoto ? "bg-ink/5 text-muted" : "bg-surface text-line-strong"
+    )}>
       <ImageIcon className="h-4 w-4" />
     </span>
   );
@@ -105,7 +111,7 @@ type PhaseFilter = "all" | PhaseKey | "complete";
 type StatusFilter = "all" | "on-track" | "alerts" | "arrived" | "in-process";
 
 export function DashboardView() {
-  const { products, active, setActiveId, reopenProduct } = useStore();
+  const { products, active, setActiveId, reopenProduct, ensureFull } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
   const [tgSending, setTgSending] = useState(false);
@@ -369,8 +375,8 @@ export function DashboardView() {
                         p={p}
                         f={f}
                         open={openId === p.id}
-                        onToggle={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
-                        onView={() => setViewId(p.id)}
+                        onToggle={() => { setOpenId((cur) => (cur === p.id ? null : p.id)); ensureFull(p.id); }}
+                        onView={() => { setViewId(p.id); ensureFull(p.id); }}
                         onResume={() => setActiveId(p.id)}
                         onReopen={() => reopenProduct(p.id)}
                       />
