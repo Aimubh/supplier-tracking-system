@@ -5,7 +5,7 @@
 // see them), and (2) creates a pipeline product with the sample pre-approved and
 // Pre-Order skipped, then jumps to On-Working. Branded with the Lazer Believe logo.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import Image from "next/image";
@@ -17,7 +17,7 @@ import { PageHeader } from "./page-header";
 const CURRENCIES: CurrencyCode[] = ["INR", "USD", "CNY"];
 
 export function QrGeneratorView() {
-  const { addProductFull, uid, products } = useStore();
+  const { addProductFull, uid, products, ensureFull } = useStore();
   const router = useRouter();
 
   // Products currently in the pipeline — offered in the picker to pre-fill the
@@ -25,6 +25,7 @@ export function QrGeneratorView() {
   // have). Filed products are hidden, matching the header switcher.
   const inProcess = products.filter((p) => !p.filed);
   const [pickOpen, setPickOpen] = useState(false);
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const [pickedName, setPickedName] = useState<string | null>(null);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -46,23 +47,41 @@ export function QrGeneratorView() {
 
   const canGenerate = productName.trim().length > 0 && supplierName.trim().length > 0;
 
-  // Pre-fill the form from an existing pipeline product. Pulls what maps cleanly
-  // to the QR fields (name, supplier, MOQ, rate + currency, media); leaves the
-  // rest for the user to complete. Reset the generated QR so it re-generates.
+  // Pre-fill the form from an existing pipeline product. Text fields fill
+  // immediately; media (base64) is stripped in the light list, so we trigger
+  // ensureFull() and let the effect below copy the photos in once they load.
   function prefillFrom(id: string) {
     const p = inProcess.find((x) => x.id === id);
     if (!p) return;
+    setPickedId(id);
     setPickedName(p.name);
     setProductName(p.name);
     setSupplierName(p.supplier?.name ?? "");
     setMoq(p.working?.moq ?? 0);
     setRate(p.working?.rateValue ?? 0);
     if (p.working?.rateCurrency) setRateCurrency(p.working.rateCurrency);
-    if (Array.isArray(p.working?.productMedia)) setMedia(p.working.productMedia);
+    // Fill media now if already present (full record); otherwise load it.
+    if (Array.isArray(p.working?.productMedia) && p.working.productMedia.length && !p._light) {
+      setMedia(p.working.productMedia);
+    } else {
+      setMedia([]); // clear stale/broken thumbs until the real media arrives
+      void ensureFull(id);
+    }
     setQrDataUrl(null);
     setCreatedId(null);
     setPickOpen(false);
   }
+
+  // Once the picked product's full media has loaded into the store, copy its
+  // photos into the form (the light list strips base64, so thumbnails were broken
+  // until this fires).
+  useEffect(() => {
+    if (!pickedId) return;
+    const p = products.find((x) => x.id === pickedId);
+    if (p && !p._light && Array.isArray(p.working?.productMedia)) {
+      setMedia(p.working.productMedia);
+    }
+  }, [pickedId, products]);
 
   async function handleGenerate() {
     if (!canGenerate || busy) return;
@@ -190,7 +209,7 @@ export function QrGeneratorView() {
                           type="button"
                           onClick={() => prefillFrom(p.id)}
                           className={`w-full rounded-lg px-3 py-2 text-left transition ${
-                            p.name === pickedName ? "bg-brand-soft" : "hover:bg-surface"
+                            p.id === pickedId ? "bg-brand-soft" : "hover:bg-surface"
                           }`}
                         >
                           <span className="block truncate text-[13px] font-medium text-ink">{p.name}</span>
