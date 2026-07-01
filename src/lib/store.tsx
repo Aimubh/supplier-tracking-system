@@ -894,10 +894,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return product.id;
   }, []);
 
-  const removeProduct = useCallback((id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
+  const removeProduct = useCallback(async (id: string) => {
+    // Snapshot for rollback if the server rejects the delete.
+    let snapshot: Product[] = [];
+    setProducts((prev) => {
+      snapshot = prev;
+      return prev.filter((p) => p.id !== id);
+    });
     setActiveIdState((cur) => (cur === id ? null : cur));
-    apiSend("DELETE", `/api/products/${id}`);
+    try {
+      const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        // Server refused (auth/other). Put the product back and tell the user.
+        setProducts(snapshot);
+        const msg = res.status === 403
+          ? "You don't have permission to delete products."
+          : res.status === 401
+          ? "Your session expired — please sign in again."
+          : `Delete failed (HTTP ${res.status}).`;
+        if (typeof window !== "undefined") window.alert(msg);
+      }
+    } catch {
+      // Network error — restore and warn.
+      setProducts(snapshot);
+      if (typeof window !== "undefined") window.alert("Delete failed — network error. Please try again.");
+    }
   }, []);
 
   // Mark a product as filed (it stays on the dashboard) and clear it out of the
