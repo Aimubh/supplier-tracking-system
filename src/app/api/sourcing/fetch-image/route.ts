@@ -1,43 +1,23 @@
-// Image-upload → supplier search bridge.
+// Image-upload → supplier search bridge (Sourcing model auto-fill).
 //   POST /api/sourcing/fetch-image   (multipart form: file=<image>)
-// Hosts the uploaded product photo on a public CDN (catbox.moe — same host the
-// Vendex pipeline uses), then asks the Vendex /process/image endpoint to image-
-// search Alibaba and return the top supplier. Faster + more reliable than reels:
-// it skips video download and frame extraction entirely.
+//
+// Uses the SAME image-search path as the live Telegram bot
+// (lib/vendex.searchSuppliersByImage): hosts the photo on a robust CDN chain
+// (imgbb → litterbox → catbox) then searches TMAPI (1688/Alibaba wholesale) →
+// Google Lens (retail) → mock. This works on Vercel with NO local Python
+// backend — the previous catbox-only + localhost:8001 path failed in production
+// ("Couldn't host the image").
 
 import { NextResponse } from "next/server";
 import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 import { enrichScraped, type ScrapedProduct } from "@/lib/sourcing-enrich";
+import { searchSuppliersByImage } from "@/lib/vendex";
+import type { RankCandidate } from "@/lib/supplier-ranking";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
-const VENDEX_TOKEN = process.env.VENDEX_API_TOKEN ?? "";
-const POLL_TIMEOUT_MS = 90_000;
-const POLL_EVERY_MS = 2_500;
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
-
-function authHeaders(): Record<string, string> {
-  return VENDEX_TOKEN
-    ? { Authorization: `Bearer ${VENDEX_TOKEN}`, "Content-Type": "application/json" }
-    : { "Content-Type": "application/json" };
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Upload bytes to catbox.moe (public, no key) → returns a public image URL.
-async function hostImage(bytes: Blob, filename: string): Promise<string> {
-  const form = new FormData();
-  form.append("reqtype", "fileupload");
-  form.append("fileToUpload", bytes, filename || "upload.jpg");
-  const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
-  const text = (await res.text()).trim();
-  if (!res.ok || !/^https?:\/\//i.test(text)) {
-    throw new Error("Image host rejected the upload");
-  }
-  return text;
-}
 
 export async function POST(req: Request) {
   const denied = await requireTabAccess(PRODUCT_TABS);
@@ -63,156 +43,86 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Image too large (max 8 MB)." }, { status: 400 });
   }
 
-  // 2) Host it publicly so Alibaba's image search can fetch it.
-  let imageUrl = "";
-  try {
-    imageUrl = await hostImage(file, file.name);
-  } catch {
-    return NextResponse.json({ error: "Couldn't host the image. Try again." }, { status: 502 });
-  }
+  // 2) Search suppliers by image (hosts the image + searches — Vercel-safe).
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg");
+  void label;
 
-  // 3) Kick off the Vendex image-search job.
-  let jobId = "";
-  try {
-    const res = await fetch(`${VENDEX}/api/v1/process/image`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ image_url: imageUrl, label }),
-    });
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `Vendex rejected the search (${res.status}). Is the scraper service running?` },
-        { status: 502 }
-      );
-    }
-    jobId = String((await res.json()).job_id ?? "");
-  } catch {
+  if (!result.ok || result.suppliers.length === 0) {
     return NextResponse.json(
-      { error: "Could not reach the Vendex service. Start it and try again." },
-      { status: 502 }
-    );
-  }
-  if (!jobId) return NextResponse.json({ error: "No job id returned." }, { status: 502 });
-
-  // 4) Poll to completion.
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-  let status = "queued";
-  while (Date.now() < deadline) {
-    await sleep(POLL_EVERY_MS);
-    try {
-      const r = await fetch(`${VENDEX}/api/v1/jobs/${jobId}`, { headers: authHeaders() });
-      if (!r.ok) continue;
-      status = String((await r.json()).status ?? "");
-      if (status === "complete" || status === "failed") break;
-    } catch {
-      /* transient */
-    }
-  }
-  if (status === "failed") {
-    // Surface the real reason if we can read it (e.g. RapidAPI quota).
-    let reason = "Image search failed.";
-    try {
-      const r = await fetch(`${VENDEX}/api/v1/jobs/${jobId}`, { headers: authHeaders() });
-      const j = await r.json();
-      const msg = String(j.errorMessage ?? j.error_message ?? "");
-      if (/quota|exceeded/i.test(msg)) {
-        reason = "Alibaba data API monthly quota is used up — upgrade the RapidAPI plan or wait for the reset.";
-      }
-    } catch {
-      /* keep generic */
-    }
-    return NextResponse.json({ error: reason }, { status: 502 });
-  }
-  if (status !== "complete") {
-    return NextResponse.json(
-      { error: "Still searching — try again in a moment.", jobId, stillRunning: true },
-      { status: 504 }
+      { error: result.error ?? "No matching suppliers found for that image." },
+      { status: result.error?.includes("No match") ? 404 : 502 }
     );
   }
 
-  // 5) Pull the top supplier and enrich.
-  let suppliers: ScrapedProduct[] = [];
-  try {
-    const r = await fetch(`${VENDEX}/api/v1/suppliers?job_id=${jobId}`, { headers: authHeaders() });
-    const data = await r.json();
-    suppliers = Array.isArray(data) ? data : data.suppliers ?? [];
-  } catch {
-    return NextResponse.json({ error: "Search done but suppliers couldn't load." }, { status: 502 });
-  }
-  if (suppliers.length === 0) {
-    return NextResponse.json({ error: "No matching suppliers found for that image." }, { status: 404 });
-  }
+  // 3) Pick the best supplier to auto-fill and enrich it into SKU inputs.
+  const top = pickRepresentative(result.suppliers);
+  const enriched = enrichScraped(toScraped(top));
 
-  const top = pickRepresentative(suppliers);
-  const enriched = enrichScraped(top);
-
-  // Lens fallback gives RETAIL prices, not Alibaba wholesale FOB — warn so the
-  // FOB field isn't mistaken for a factory quote.
+  // Lens/retail results aren't Alibaba wholesale FOB — flag so the FOB field
+  // isn't mistaken for a factory quote.
   const isRetail = top.platform === "google_lens";
 
   return NextResponse.json({
-    jobId,
-    supplierCount: suppliers.length,
+    supplierCount: result.suppliers.length,
     lowConfidence: isRetail,
-    note: isRetail
-      ? "Shown from Google Lens (retail prices, not Alibaba wholesale FOB) — Alibaba data API quota is out. Treat FOB as approximate."
-      : "",
+    note: result.note ?? (isRetail
+      ? "Shown from Google Lens (retail prices, not Alibaba wholesale FOB). Treat FOB as approximate."
+      : ""),
     inputs: enriched.inputs,
     flags: enriched.flags,
     raw: {
-      supplierName: (top as Record<string, unknown>).supplierName ?? "",
+      supplierName: top.name ?? "",
       country: top.country ?? "",
-      productUrl: (top as Record<string, unknown>).productUrl ?? "",
-      productImageUrl: top.productImageUrl ?? imageUrl,
+      productUrl: top.url ?? "",
+      productImageUrl: top.image ?? "",
     },
-    suppliers: mapSupplierList(suppliers),
+    suppliers: result.suppliers.slice(0, 20).map((s) => ({
+      name: s.name,
+      title: s.title,
+      priceUsd: s.priceUsd,
+      priceInr: s.priceInr,
+      reviews: s.reviews,
+      rating: s.rating,
+      country: s.country,
+      url: s.url,
+      image: s.image,
+      platform: s.platform,
+    })),
   });
 }
 
-// Pick the best supplier to auto-fill, not just the first result (which is often
-// an outlier — e.g. a $954 bulk carton for a single pen). For a sourcing tool we
-// want the CHEAPEST realistic price, after discarding statistical outliers via
-// the IQR rule (so a stray $2691 listing can't drag the choice). Falls back to
-// the first result if nothing is priced.
-function pickRepresentative(suppliers: ScrapedProduct[]): ScrapedProduct {
-  const priceOf = (s: ScrapedProduct) =>
-    (s as Record<string, unknown>).unitPriceUSD as number | undefined;
+// Map a search candidate into the ScrapedProduct shape enrichScraped expects.
+function toScraped(c: RankCandidate): ScrapedProduct {
+  return {
+    productName: c.title || c.name,
+    unitPriceUSD: c.priceUsd ?? undefined,
+    priceRangeMin: c.priceUsd ?? undefined,
+    country: c.country,
+    productImageUrl: c.image,
+    platform: c.platform,
+  };
+}
+
+// Pick the best supplier to auto-fill, not just the first result (often an
+// outlier — e.g. a $954 bulk carton). Prefer the CHEAPEST realistic price after
+// discarding statistical outliers via the IQR rule. Falls back to the first
+// result when nothing is priced.
+function pickRepresentative(suppliers: RankCandidate[]): RankCandidate {
+  const priceOf = (s: RankCandidate) => s.priceUsd ?? s.priceInr ?? undefined;
   const priced = suppliers.filter((s) => {
     const p = priceOf(s);
     return typeof p === "number" && p > 0;
   });
   if (priced.length === 0) return suppliers[0];
   if (priced.length <= 2) {
-    // Too few to detect outliers — take the cheaper one.
     return priced.reduce((a, b) => (priceOf(b)! < priceOf(a)! ? b : a));
   }
   const prices = priced.map((s) => priceOf(s)!).sort((a, b) => a - b);
-  // IQR outlier fence: discard prices above Q3 + 1.5·IQR.
   const q1 = prices[Math.floor(prices.length * 0.25)];
   const q3 = prices[Math.floor(prices.length * 0.75)];
   const upperFence = q3 + 1.5 * (q3 - q1);
   const sane = priced.filter((s) => priceOf(s)! <= upperFence);
   const pool = sane.length > 0 ? sane : priced;
-  // Cheapest within the sane set — the best deal to counter the supplier with.
   return pool.reduce((a, b) => (priceOf(b)! < priceOf(a)! ? b : a));
-}
-
-// Compact, UI-friendly list of suppliers so the user can click through and
-// verify each result themselves.
-function mapSupplierList(suppliers: ScrapedProduct[]) {
-  return suppliers.slice(0, 20).map((s) => {
-    const r = s as Record<string, unknown>;
-    return {
-      name: String(r.supplierName ?? "Supplier"),
-      title: String(r.productName ?? ""),
-      priceUsd: (r.unitPriceUSD as number) ?? null,
-      priceInr: (r.unitPriceINR as number) ?? null,
-      reviews: (r.reviewCount as number) ?? null,
-      rating: (r.rating as number) ?? null,
-      country: String(r.country ?? ""),
-      url: String(r.productUrl ?? ""),
-      image: String(r.productImageUrl ?? ""),
-      platform: String(r.platform ?? ""),
-    };
-  });
 }
