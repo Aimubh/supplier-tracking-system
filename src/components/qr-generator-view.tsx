@@ -45,7 +45,14 @@ export function QrGeneratorView() {
   const [busy, setBusy] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  const canGenerate = productName.trim().length > 0 && supplierName.trim().length > 0;
+  // The currently picked existing product (if any) and whether it ALREADY has a
+  // QR. If it does, we don't create a duplicate — we just show/download that
+  // product's existing QR (same /qr/:id code).
+  const pickedProduct = pickedId ? products.find((x) => x.id === pickedId) ?? null : null;
+  const alreadyHasQr = Boolean(pickedProduct?.qrGen);
+
+  const canGenerate =
+    !alreadyHasQr && productName.trim().length > 0 && supplierName.trim().length > 0;
 
   // Pre-fill the form from an existing pipeline product. Text fields fill
   // immediately; media (base64) is stripped in the light list, so we trigger
@@ -70,6 +77,26 @@ export function QrGeneratorView() {
     setQrDataUrl(null);
     setCreatedId(null);
     setPickOpen(false);
+
+    // If this product ALREADY has a QR, render its existing code (same /qr/:id)
+    // instead of offering to generate a new one — no duplicate product created.
+    if (p.qrGen) {
+      void renderExistingQr(id);
+    }
+  }
+
+  // Render the QR for an existing product's public scan URL (does NOT create a
+  // new product). Used when the picked product already has a QR.
+  async function renderExistingQr(id: string) {
+    const scanUrl = `${window.location.origin}/qr/${id}`;
+    const dataUrl = await QRCode.toDataURL(scanUrl, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 512,
+      color: { dark: "#15130e", light: "#ffffff" },
+    });
+    setQrDataUrl(dataUrl);
+    setCreatedId(id);
   }
 
   // Once the picked product's full media has loaded into the store, copy its
@@ -250,7 +277,14 @@ export function QrGeneratorView() {
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
             {busy ? "Generating…" : "Generate QR & create product"}
           </button>
-          {!canGenerate && <p className="mt-2 text-[11px] text-muted">Product name and supplier name are required.</p>}
+          {alreadyHasQr ? (
+            <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-pending">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              &ldquo;{pickedProduct?.name}&rdquo; already has a QR — showing it on the right. Pick a different product or clear the name to create a new one.
+            </p>
+          ) : (
+            !canGenerate && <p className="mt-2 text-[11px] text-muted">Product name and supplier name are required.</p>
+          )}
         </div>
 
         {/* RIGHT — QR result + branding */}
@@ -278,7 +312,8 @@ export function QrGeneratorView() {
               {createdId && (
                 <div className="mt-4 w-full rounded-md bg-go/10 px-3 py-2.5 ring-1 ring-inset ring-go/20">
                   <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-go">
-                    <CheckCircle2 className="h-4 w-4" /> Product created · Pre-Order skipped
+                    <CheckCircle2 className="h-4 w-4" />
+                    {alreadyHasQr ? "Existing QR for this product" : "Product created · Pre-Order skipped"}
                   </p>
                 </div>
               )}
