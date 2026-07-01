@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import Image from "next/image";
-import { QrCode, ArrowRight, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { QrCode, ArrowRight, Download, Loader2, CheckCircle2, ChevronDown, Package } from "lucide-react";
 import { useStore, blankProduct, type CurrencyCode, type MediaItem, type QrGen } from "@/lib/store";
 import { MediaUpload } from "./media-upload";
 import { PageHeader } from "./page-header";
@@ -17,8 +17,15 @@ import { PageHeader } from "./page-header";
 const CURRENCIES: CurrencyCode[] = ["INR", "USD", "CNY"];
 
 export function QrGeneratorView() {
-  const { addProductFull, uid } = useStore();
+  const { addProductFull, uid, products } = useStore();
   const router = useRouter();
+
+  // Products currently in the pipeline — offered in the picker to pre-fill the
+  // form (so you don't retype name/supplier/MOQ/rate for a product you already
+  // have). Filed products are hidden, matching the header switcher.
+  const inProcess = products.filter((p) => !p.filed);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [pickedName, setPickedName] = useState<string | null>(null);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [orderDate, setOrderDate] = useState("");
@@ -38,6 +45,24 @@ export function QrGeneratorView() {
   const [createdId, setCreatedId] = useState<string | null>(null);
 
   const canGenerate = productName.trim().length > 0 && supplierName.trim().length > 0;
+
+  // Pre-fill the form from an existing pipeline product. Pulls what maps cleanly
+  // to the QR fields (name, supplier, MOQ, rate + currency, media); leaves the
+  // rest for the user to complete. Reset the generated QR so it re-generates.
+  function prefillFrom(id: string) {
+    const p = inProcess.find((x) => x.id === id);
+    if (!p) return;
+    setPickedName(p.name);
+    setProductName(p.name);
+    setSupplierName(p.supplier?.name ?? "");
+    setMoq(p.working?.moq ?? 0);
+    setRate(p.working?.rateValue ?? 0);
+    if (p.working?.rateCurrency) setRateCurrency(p.working.rateCurrency);
+    if (Array.isArray(p.working?.productMedia)) setMedia(p.working.productMedia);
+    setQrDataUrl(null);
+    setCreatedId(null);
+    setPickOpen(false);
+  }
 
   async function handleGenerate() {
     if (!canGenerate || busy) return;
@@ -132,6 +157,53 @@ export function QrGeneratorView() {
       <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
         {/* LEFT — the form */}
         <div className="rounded-lg border border-line bg-white p-5">
+          {/* Product picker — pre-fill the form from an in-process product */}
+          <div className="relative mb-4">
+            <button
+              type="button"
+              onClick={() => setPickOpen((o) => !o)}
+              className="flex w-full items-center gap-2.5 rounded-lg border border-line bg-surface px-3 py-2 text-left transition hover:border-line-strong"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink text-white">
+                <Package className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="eyebrow block">Pre-fill from product</span>
+                <span className="block truncate text-[13px] font-semibold text-ink">
+                  {pickedName ?? "Choose a product (optional)"}
+                </span>
+              </span>
+              <ChevronDown className="h-4 w-4 text-muted" />
+            </button>
+
+            {pickOpen && (
+              <div className="absolute left-0 top-full z-30 mt-2 w-full rounded-xl border border-line bg-white p-2 shadow-card">
+                {inProcess.length === 0 ? (
+                  <p className="px-3 py-4 text-center text-[12px] text-muted">
+                    No products in process to pre-fill from.
+                  </p>
+                ) : (
+                  <ul className="max-h-64 overflow-y-auto">
+                    {inProcess.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => prefillFrom(p.id)}
+                          className={`w-full rounded-lg px-3 py-2 text-left transition ${
+                            p.name === pickedName ? "bg-brand-soft" : "hover:bg-surface"
+                          }`}
+                        >
+                          <span className="block truncate text-[13px] font-medium text-ink">{p.name}</span>
+                          <span className="eyebrow">{p.category || "uncategorised"}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
           <p className="eyebrow mb-4">Product details</p>
 
           <div className="mb-4">

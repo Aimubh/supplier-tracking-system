@@ -19,6 +19,7 @@ import {
   Search,
   X,
   Bell,
+  Trash2,
 } from "lucide-react";
 import { useStore, type Product } from "@/lib/store";
 import { computeCosting } from "@/lib/costing";
@@ -111,7 +112,7 @@ type PhaseFilter = "all" | PhaseKey | "complete";
 type StatusFilter = "all" | "on-track" | "alerts" | "arrived" | "in-process";
 
 export function DashboardView() {
-  const { products, active, setActiveId, reopenProduct, ensureFull } = useStore();
+  const { products, active, setActiveId, reopenProduct, ensureFull, removeProduct } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
   const [tgSending, setTgSending] = useState(false);
@@ -379,6 +380,15 @@ export function DashboardView() {
                         onView={() => { setViewId(p.id); ensureFull(p.id); }}
                         onResume={() => setActiveId(p.id)}
                         onReopen={() => reopenProduct(p.id)}
+                        onDelete={() => {
+                          if (
+                            confirm(
+                              `Delete "${p.name}" permanently?\n\nThis removes the product and all its data (photos, costing, documents). This cannot be undone.`
+                            )
+                          ) {
+                            removeProduct(p.id);
+                          }
+                        }}
                       />
                     ))
                   )}
@@ -406,6 +416,7 @@ function ProductRow({
   onView,
   onResume,
   onReopen,
+  onDelete,
 }: {
   p: Product;
   f: Flow;
@@ -414,6 +425,7 @@ function ProductRow({
   onView: () => void;
   onResume: () => void;
   onReopen: () => void;
+  onDelete: () => void;
 }) {
   const reduce = useReducedMotion();
 
@@ -536,6 +548,14 @@ function ProductRow({
                 Complete
               </span>
             )}
+            <button
+              onClick={onDelete}
+              title="Delete product permanently"
+              aria-label={`Delete ${p.name}`}
+              className="flex shrink-0 items-center justify-center rounded-lg border border-block/30 bg-block/5 p-1.5 text-block transition hover:bg-block hover:text-white"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </td>
       </tr>
