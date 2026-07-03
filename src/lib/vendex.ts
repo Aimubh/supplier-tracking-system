@@ -232,7 +232,7 @@ async function searchViaSerpApi(imageUrl: string): Promise<RankCandidate[]> {
     hl: "en",
   });
   const res = await fetch(`https://serpapi.com/search?${params.toString()}`, {
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(45_000),
   });
   if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
   const data = await res.json();
