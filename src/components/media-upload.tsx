@@ -31,8 +31,39 @@ export function MediaUpload({
     return "image";
   }
 
-  function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+  // iPhone photos are HEIC/HEIF, which browsers (except Safari) can't render, so
+  // they'd show a broken-image icon. Convert them to JPEG in the browser on
+  // upload so what we store is universally viewable.
+  function isHeic(file: File): boolean {
+    const t = file.type.toLowerCase();
+    const n = file.name.toLowerCase();
+    return t === "image/heic" || t === "image/heif" || n.endsWith(".heic") || n.endsWith(".heif");
+  }
+
+  async function toStorable(file: File): Promise<File> {
+    if (!isHeic(file)) return file;
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const out = (await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 })) as Blob;
+      const jpegName = file.name.replace(/\.(heic|heif)$/i, ".jpg");
+      return new File([out], jpegName, { type: "image/jpeg" });
+    } catch {
+      // Conversion failed — keep the original so the file isn't lost (it just
+      // won't preview on non-Safari browsers).
+      return file;
+    }
+  }
+
+  const readAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+
+  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-picking the same files
     if (files.length === 0) return;
 
     const tooBig = files.filter((f) => f.size > maxMb * 1024 * 1024).map((f) => f.name);
@@ -41,26 +72,21 @@ export function MediaUpload({
     }
     const ok = files.filter((f) => f.size <= maxMb * 1024 * 1024);
 
-    // Read all picked files, then append the batch in order.
-    Promise.all(
-      ok.map(
-        (file) =>
-          new Promise<MediaItem>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () =>
-              resolve({
-                id: uid("media"),
-                kind: kindOf(file.type),
-                fileName: file.name,
-                fileType: file.type,
-                data: String(reader.result),
-              });
-            reader.readAsDataURL(file);
-          })
-      )
-    ).then((picked) => onChange([...items, ...picked]));
-
-    e.target.value = ""; // allow re-picking the same files
+    // Convert HEIC → JPEG where needed, then read each to a base64 data URL.
+    const picked = await Promise.all(
+      ok.map(async (raw) => {
+        const file = await toStorable(raw);
+        const data = await readAsDataUrl(file);
+        return {
+          id: uid("media"),
+          kind: kindOf(file.type),
+          fileName: file.name,
+          fileType: file.type,
+          data,
+        } as MediaItem;
+      })
+    );
+    onChange([...items, ...picked]);
   }
 
   function remove(id: string) {
