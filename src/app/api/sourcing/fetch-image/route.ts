@@ -36,7 +36,15 @@ export async function POST(req: Request) {
   if (!file || file.size === 0) {
     return NextResponse.json({ error: "No image provided." }, { status: 400 });
   }
-  if (!file.type.startsWith("image/")) {
+  // Accept anything that IS an image, plus iPhone HEIC/HEIF (whose browser MIME
+  // type is often empty or "image/heic"). The client converts HEIC→JPEG before
+  // upload; this is a defensive net so a mislabelled type doesn't hard-block.
+  const name = (file.name ?? "").toLowerCase();
+  const looksImage =
+    file.type.startsWith("image/") ||
+    file.type === "" ||
+    /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/.test(name);
+  if (!looksImage) {
     return NextResponse.json({ error: "Please upload an image file." }, { status: 400 });
   }
   if (file.size > MAX_BYTES) {
