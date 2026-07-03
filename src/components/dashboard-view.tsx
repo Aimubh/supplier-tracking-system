@@ -22,7 +22,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useStore, type Product } from "@/lib/store";
-import { computeCosting } from "@/lib/costing";
+import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
 import { SpotlightCard } from "./spotlight-card";
@@ -585,34 +585,30 @@ function ProductRow({
 // The detail view shown when a product row is expanded: key facts + the full
 // step checklist grouped by phase.
 function DetailPanel({ p, f }: { p: Product; f: Flow }) {
-  const costing = computeCosting(p.costing, p.compliance.dutyRatePct, p.compliance.igstRatePct);
+  // Sourcing model — the single Pre-Order step; drives HSN, verdict and margin.
+  const src = p.sourcing;
+  const sourcing = src ? computeSourcing(src.assumptions, src.inputs) : null;
   // Prefer the first uploaded image from the gallery; fall back to legacy single image.
   const media = p.working.productMedia ?? [];
   const heroImage = media.find((m) => m.kind === "image")?.data || p.working.productImage;
   const mediaCount = media.length;
   const facts: { label: string; value: string; tone?: "go" | "block" | "pending" }[] = [
     { label: "Category", value: p.category || "—" },
-    { label: "Supplier", value: p.supplier.name || "—" },
+    { label: "Supplier", value: src?.supplierName || p.supplier.name || "—" },
+    { label: "HS code", value: src?.inputs?.hsnCode || "—" },
     {
-      label: "Supplier check",
-      value: p.supplier.verification.replace("_", " ").toLowerCase(),
-      tone: p.supplier.verification === "VERIFIED" ? "go" : "pending",
+      label: "FOB (USD)",
+      value: src && src.inputs.fobUsd > 0 ? `$${src.inputs.fobUsd.toFixed(2)}` : "—",
     },
     {
-      label: "Compliance",
-      value: p.compliance.status === "CLEARED" ? "cleared" : "blocked",
-      tone: p.compliance.status === "CLEARED" ? "go" : "block",
-    },
-    { label: "HS code", value: p.compliance.hsCode || "—" },
-    {
-      label: "Costing verdict",
-      value: costing.verdict === "GO" ? "GO" : costing.verdict === "NO_GO" ? "NO-GO" : "pending",
-      tone: costing.verdict === "GO" ? "go" : costing.verdict === "NO_GO" ? "block" : "pending",
+      label: "Sourcing verdict",
+      value: sourcing ? (sourcing.verdict === "NO_GO" ? "NO-GO" : sourcing.verdict) : "—",
+      tone: sourcing?.verdict === "GO" ? "go" : sourcing?.verdict === "NO_GO" ? "block" : "pending",
     },
     {
-      label: "Net margin",
-      value: costing.verdict === "PENDING" ? "—" : `${costing.netMarginPct.toFixed(1)}%`,
-      tone: costing.verdict === "GO" ? "go" : costing.verdict === "NO_GO" ? "block" : undefined,
+      label: "Best contribution",
+      value: sourcing && sourcing.bestContributionPct > 0 ? `${(sourcing.bestContributionPct * 100).toFixed(1)}%` : "—",
+      tone: sourcing?.verdict === "GO" ? "go" : sourcing?.verdict === "NO_GO" ? "block" : undefined,
     },
     { label: "Order qty (MOQ)", value: p.working.moq > 0 ? p.working.moq.toLocaleString() : "—" },
     { label: "Total amount", value: p.working.rateValue > 0 ? `${p.working.rate} ${p.working.rateValue.toLocaleString()} ${p.working.rateCurrency ?? "INR"}` : "—" },

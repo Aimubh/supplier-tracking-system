@@ -12,13 +12,12 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { useStore, type MediaItem, type CurrencyCode } from "@/lib/store";
-import { computeCosting } from "@/lib/costing";
+import { computeSourcing } from "@/lib/sourcing-model";
 import { getFlow, type PhaseKey } from "@/lib/flow";
 import { motion, AnimatePresence, useReducedMotion } from "./motion";
 import {
   X,
   Boxes,
-  Building2,
   ShieldCheck,
   Calculator,
   FlaskConical,
@@ -67,7 +66,8 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
 
   if (!p) return null;
   const f = getFlow(p);
-  const costing = computeCosting(p.costing, p.compliance.dutyRatePct, p.compliance.igstRatePct);
+  const src = p.sourcing;
+  const sourcing = src ? computeSourcing(src.assumptions, src.inputs) : null;
   const L = p.logistics;
   const w = p.working;
 
@@ -94,76 +94,41 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
   });
 
   // Top summary chips — the numbers people glance at first.
+  const verdict = sourcing?.verdict ?? "PENDING";
   const verdictTone: Tone =
-    costing.verdict === "GO" ? "go" : costing.verdict === "NO_GO" ? "block" : "pending";
-  const verdictText = costing.verdict === "GO" ? "GO" : costing.verdict === "NO_GO" ? "NO-GO" : "Pending";
+    verdict === "GO" ? "go" : verdict === "NO_GO" ? "block" : "pending";
+  const verdictText = verdict === "GO" ? "GO" : verdict === "NO_GO" ? "NO-GO" : "Pending";
   const capital = p.payments.filter((x) => x.status === "PAID").reduce((s, x) => s + x.amount, 0);
 
   const summary = [
     { label: "Progress", value: `${f.percent}%`, tone: f.percent === 100 ? ("go" as Tone) : undefined },
-    { label: "Costing", value: verdictText, tone: verdictTone },
+    { label: "Sourcing", value: verdictText, tone: verdictTone },
     { label: "Order qty", value: w.moq > 0 ? w.moq.toLocaleString() : "—" },
     { label: "Capital paid", value: capital > 0 ? `$${capital.toLocaleString()}` : "—" },
   ];
 
   // ---- Field groups per phase ----
+  // Pre-Order is a single Sourcing model step now — supplier, HSN, landed cost,
+  // channel margins and the GO/NO-GO verdict all in one group.
+  const inr = (n: number) => (n > 0 ? `₹${Math.round(n).toLocaleString("en-IN")}` : "—");
   const preGroups: Group[] = [
     {
-      icon: Building2,
-      title: "Supplier",
-      fields: [
-        { label: "Name", value: dash(p.supplier.name) },
-        { label: "Type", value: p.supplier.type.toLowerCase(), tone: "muted" },
-        { label: "Contact", value: dash(p.supplier.contact) },
-        {
-          label: "Verification",
-          value: p.supplier.verification.replace("_", " ").toLowerCase(),
-          tone: p.supplier.verification === "VERIFIED" ? "go" : "pending",
-          chip: true,
-        },
-        { label: "Notes", value: dash(p.supplier.notes) },
-      ],
-    },
-    {
-      icon: ShieldCheck,
-      title: "Compliance",
-      fields: [
-        { label: "HS code", value: dash(p.compliance.hsCode) },
-        { label: "Duty rate", value: pct(p.compliance.dutyRatePct) },
-        { label: "IGST rate", value: pct(p.compliance.igstRatePct) },
-        {
-          label: "Licence",
-          value: p.compliance.licenceRequired ? p.compliance.licenceStatus.toLowerCase() : "not required",
-          tone: p.compliance.licenceStatus === "OBTAINED" || !p.compliance.licenceRequired ? "go" : "pending",
-          chip: true,
-        },
-        {
-          label: "Status",
-          value: p.compliance.status === "CLEARED" ? "Cleared" : "Blocked",
-          tone: p.compliance.status === "CLEARED" ? "go" : "block",
-          chip: true,
-        },
-      ],
-    },
-    {
       icon: Calculator,
-      title: "Costing",
+      title: "Sourcing model",
       fields: [
-        { label: "Marketplace", value: dash(p.costing.marketplace) },
-        { label: "Selling price", value: money(p.costing.sellingPrice) },
-        { label: "Ex-works", value: money(p.costing.exWorks) },
-        { label: "Freight / unit", value: money(p.costing.freightPerUnit) },
-        { label: "Referral", value: pct(p.costing.referralPct) },
-        { label: "Fulfilment fee", value: money(p.costing.fulfilmentFee) },
-        { label: "Ad (TACOS)", value: pct(p.costing.adPct) },
-        { label: "Returns", value: pct(p.costing.returnPct) },
-        { label: "Required margin", value: pct(p.costing.requiredMarginPct) },
-        { label: "Landed cost", value: money(Math.round(costing.landedCost * 100) / 100) },
+        { label: "Supplier", value: dash(src?.supplierName || p.supplier.name) },
+        { label: "Country", value: dash(src?.supplierCountry || "") },
+        { label: "Item name", value: dash(src?.inputs.itemName || "") },
+        { label: "HS code", value: dash(src?.inputs.hsnCode || "") },
+        { label: "FOB / piece", value: src && src.inputs.fobUsd > 0 ? `$${src.inputs.fobUsd.toFixed(2)}` : "—" },
+        { label: "Unit weight", value: src && src.inputs.unitWeightG > 0 ? `${src.inputs.unitWeightG} g` : "—" },
+        { label: "Landed cost", value: inr(sourcing?.landedInr ?? 0) },
         {
-          label: "Net margin",
-          value: costing.verdict === "PENDING" ? "—" : `${costing.netMarginPct.toFixed(1)}%`,
-          tone: costing.verdict === "GO" ? "go" : costing.verdict === "NO_GO" ? "block" : undefined,
+          label: "Best contribution",
+          value: sourcing && sourcing.bestContributionPct > 0 ? `${(sourcing.bestContributionPct * 100).toFixed(1)}%` : "—",
+          tone: verdict === "GO" ? "go" : verdict === "NO_GO" ? "block" : undefined,
         },
+        { label: "Max FOB @ target", value: sourcing && sourcing.maxFobUsd > 0 ? `$${sourcing.maxFobUsd.toFixed(2)}` : "—" },
         { label: "Verdict", value: verdictText, tone: verdictTone, chip: true },
       ],
     },
