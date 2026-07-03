@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { UploadCloud, X, FileText, Play } from "lucide-react";
 import type { MediaItem } from "@/lib/store";
+import { toJpegIfHeic } from "@/lib/heic";
 
 // Multi-file uploader for photos, videos and PDFs. Each file is read to a
 // base64 data URL and added to the gallery, so several can be attached to one
@@ -31,29 +32,6 @@ export function MediaUpload({
     return "image";
   }
 
-  // iPhone photos are HEIC/HEIF, which browsers (except Safari) can't render, so
-  // they'd show a broken-image icon. Convert them to JPEG in the browser on
-  // upload so what we store is universally viewable.
-  function isHeic(file: File): boolean {
-    const t = file.type.toLowerCase();
-    const n = file.name.toLowerCase();
-    return t === "image/heic" || t === "image/heif" || n.endsWith(".heic") || n.endsWith(".heif");
-  }
-
-  async function toStorable(file: File): Promise<File> {
-    if (!isHeic(file)) return file;
-    try {
-      const heic2any = (await import("heic2any")).default;
-      const out = (await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 })) as Blob;
-      const jpegName = file.name.replace(/\.(heic|heif)$/i, ".jpg");
-      return new File([out], jpegName, { type: "image/jpeg" });
-    } catch {
-      // Conversion failed — keep the original so the file isn't lost (it just
-      // won't preview on non-Safari browsers).
-      return file;
-    }
-  }
-
   const readAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve) => {
       const reader = new FileReader();
@@ -75,7 +53,7 @@ export function MediaUpload({
     // Convert HEIC → JPEG where needed, then read each to a base64 data URL.
     const picked = await Promise.all(
       ok.map(async (raw) => {
-        const file = await toStorable(raw);
+        const file = await toJpegIfHeic(raw);
         const data = await readAsDataUrl(file);
         return {
           id: uid("media"),

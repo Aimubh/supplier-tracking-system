@@ -17,6 +17,7 @@ import {
 } from "@/lib/sourcing-model";
 import { recommend, type MarketSize } from "@/lib/market-size";
 import type { HsnCandidate } from "@/lib/hsn-advisor";
+import { toJpegIfHeic } from "@/lib/heic";
 import { Field, Text, Num, Stat, PanelHead } from "../fields";
 import { Seal, Chip } from "../seal";
 import { useDraft } from "../use-draft";
@@ -99,10 +100,13 @@ export function SourcingPanel() {
   }
 
   // ---- Auto-fill from an uploaded product image ----
-  async function autoFillFromImage(file: File) {
+  async function autoFillFromImage(raw: File) {
     setFetching(true);
-    setFetchMsg({ tone: "ok", text: `Searching Alibaba by image “${file.name}”…` });
+    setFetchMsg({ tone: "ok", text: `Searching Alibaba by image “${raw.name}”…` });
     try {
+      // iPhone HEIC/HEIF isn't a browser-viewable image type — convert to JPEG
+      // first so the server accepts it and image search can fetch it.
+      const file = await toJpegIfHeic(raw);
       const form = new FormData();
       form.append("file", file);
       form.append("label", i.itemName || "");
