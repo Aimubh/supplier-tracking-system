@@ -118,10 +118,19 @@ export async function POST() {
   return runReminders();
 }
 
-// Cron trigger — no session; authorised by a shared secret in the query string.
+// Cron trigger — no session. Authorised either by:
+//   • Vercel Cron's built-in header:  Authorization: Bearer <CRON_SECRET>, or
+//   • a shared secret in the query string (used by the local backend loop).
 export async function GET(req: Request) {
-  const secret = new URL(req.url).searchParams.get("secret") ?? "";
-  if (!process.env.REMINDER_CRON_SECRET || secret !== process.env.REMINDER_CRON_SECRET) {
+  const qSecret = new URL(req.url).searchParams.get("secret") ?? "";
+  const authHeader = req.headers.get("authorization") ?? "";
+  const cronSecret = process.env.CRON_SECRET ?? "";
+  const reminderSecret = process.env.REMINDER_CRON_SECRET ?? "";
+
+  const viaVercelCron = cronSecret !== "" && authHeader === `Bearer ${cronSecret}`;
+  const viaQuery = reminderSecret !== "" && qSecret === reminderSecret;
+
+  if (!viaVercelCron && !viaQuery) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return runReminders();

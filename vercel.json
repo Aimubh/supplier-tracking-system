@@ -5,5 +5,11 @@
     "src/app/api/sourcing/fetch/route.ts": { "maxDuration": 60 },
     "src/app/api/sourcing/market-size/route.ts": { "maxDuration": 60 },
     "src/app/api/telegram/webhook/route.ts": { "maxDuration": 60 }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/reminders/send",
+      "schedule": "30 3 * * *"
+    }
+  ]
 }
