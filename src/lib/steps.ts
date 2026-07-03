@@ -9,31 +9,12 @@ export interface ProcessStep {
 }
 
 // 2) PRE-ORDER — decide before we spend a rupee.
+// Streamlined to the single Sourcing model step (Market check / supplier vetting /
+// compliance / costing are folded into it — paste a link or image and the model
+// computes landed cost, channel margins, HSN and the GO / NO-GO verdict).
 export const PRE_ORDER_STEPS: ProcessStep[] = [
   {
     n: 1,
-    title: "Market check",
-    desc: "Competitor prices and realistic demand on each channel we would sell on.",
-  },
-  {
-    n: 2,
-    title: "Find and vet the supplier",
-    desc: "Confirm it is a real factory, not a middleman.",
-  },
-  {
-    n: 3,
-    title: "Check compliance",
-    desc: "HS code, duty / GST, and whether it needs BIS or any import licence.",
-    gate: true,
-  },
-  {
-    n: 4,
-    title: "Costing check",
-    desc: "Work the price backwards from what we can sell at; decide go or no-go.",
-    gate: true,
-  },
-  {
-    n: 5,
     title: "Sourcing model",
     desc: "Full per-SKU landed cost and channel margins — the LAZERECOM model with a GO / NO-GO verdict and counter-offer ceiling.",
   },

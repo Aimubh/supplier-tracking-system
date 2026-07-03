@@ -2,7 +2,6 @@
 // Both the dashboard and the panels read from here so they never disagree.
 
 import type { Product } from "./store";
-import { computeCosting } from "./costing";
 
 export type PhaseKey = "pre-order" | "on-working" | "post-order";
 export type PhaseState = "done" | "active" | "todo";
@@ -35,7 +34,7 @@ const PHASE_NAME: Record<PhaseKey, string> = {
 
 // Number of sub-steps in each tab.
 const STEP_COUNT: Record<PhaseKey, number> = {
-  "pre-order": 4,
+  "pre-order": 1,
   "on-working": 3,
   "post-order": 3,
 };
@@ -56,17 +55,13 @@ export function nextLocation(
 }
 
 export function getFlow(p: Product): Flow {
-  const costing = computeCosting(p.costing, p.compliance.dutyRatePct, p.compliance.igstRatePct);
   const w = p.working;
   const l = p.logistics;
 
   // Define every step and whether its data marks it done.
   const steps: StepStatus[] = [
-    // Pre-Order
-    { tab: "pre-order", step: 1, label: "Market check", done: p.market.length > 0 },
-    { tab: "pre-order", step: 2, label: "Vet supplier", done: p.supplier.verification === "VERIFIED" },
-    { tab: "pre-order", step: 3, label: "Compliance", done: p.compliance.status === "CLEARED" },
-    { tab: "pre-order", step: 4, label: "Costing", done: costing.verdict === "GO" },
+    // Pre-Order — single Sourcing model step (done once a FOB price is in).
+    { tab: "pre-order", step: 1, label: "Sourcing model", done: (p.sourcing?.inputs?.fobUsd ?? 0) > 0 },
     // On-Working
     {
       tab: "on-working",
@@ -117,9 +112,6 @@ export function getFlow(p: Product): Flow {
   const alerts: Flow["alerts"] = [];
   if (w.sampleResult === "REJECTED") alerts.push({ tone: "block", text: "Sample rejected" });
   if (w.packagingResult === "REJECTED") alerts.push({ tone: "block", text: "Logo rejected" });
-  if (p.compliance.status !== "CLEARED" && p.compliance.hsCode)
-    alerts.push({ tone: "pending", text: "Compliance not cleared" });
-  if (costing.verdict === "NO_GO") alerts.push({ tone: "block", text: "Costing is NO-GO" });
   const balancePending = p.payments.some((x) => x.type === "BALANCE" && x.status === "PENDING");
   if (balancePending && w.sampleResult !== "APPROVED")
     alerts.push({ tone: "pending", text: "Balance locked" });

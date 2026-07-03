@@ -9,7 +9,6 @@ import { useStore } from "@/lib/store";
 import { PackageOpen } from "lucide-react";
 import type { TabKey } from "@/lib/access";
 
-import { MarketPanel, SupplierPanel, CompliancePanel, CostingPanel } from "./panels/pre-order";
 import { SourcingPanel } from "./panels/sourcing";
 import {
   ProductDecisionPanel,
@@ -29,11 +28,7 @@ const PANELS: Record<TabKey, Record<number, () => JSX.Element | null>> = {
   "qr-generator": {}, // standalone page, no stepped panels
   "order-summary": {},
   "pre-order": {
-    1: MarketPanel,
-    2: SupplierPanel,
-    3: CompliancePanel,
-    4: CostingPanel,
-    5: SourcingPanel,
+    1: SourcingPanel,
   },
   "on-working": {
     1: ProductDecisionPanel,
@@ -52,7 +47,11 @@ export function StepRouter({ tab }: { tab: TabKey }) {
   const reduce = useReducedMotion();
   const { active } = useStore();
   const step = Number(searchParams.get("step")) || 1;
-  const Panel = PANELS[tab]?.[step] ?? null;
+  const panels = PANELS[tab] ?? {};
+  // Fall back to the first available step if the requested one no longer exists
+  // (e.g. an old bookmarked ?step=3 after Pre-Order was reduced to one step).
+  const firstStep = Object.keys(panels)[0];
+  const Panel = panels[step] ?? (firstStep ? panels[Number(firstStep)] : null);
 
   return (
     <div>
