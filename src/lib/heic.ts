@@ -14,13 +14,31 @@ export function isHeic(file: File): boolean {
 // Return a storable/uploadable File: HEIC → JPEG, everything else unchanged.
 // On conversion failure, returns the original file so nothing is lost.
 export async function toJpegIfHeic(file: File, quality = 0.85): Promise<File> {
-  if (!isHeic(file)) return file;
+  const r = await convertHeic(file, quality);
+  return r.file;
+}
+
+// Like toJpegIfHeic but also reports whether a HEIC failed to convert, so the
+// caller can warn the user (an unconverted HEIC won't preview outside Safari).
+export async function convertHeic(
+  file: File,
+  quality = 0.85
+): Promise<{ file: File; wasHeic: boolean; converted: boolean; error?: string }> {
+  if (!isHeic(file)) return { file, wasHeic: false, converted: false };
   try {
     const heic2any = (await import("heic2any")).default;
-    const out = (await heic2any({ blob: file, toType: "image/jpeg", quality })) as Blob;
+    const result = (await heic2any({ blob: file, toType: "image/jpeg", quality })) as Blob | Blob[];
+    // heic2any can return an array (multi-image HEIC) — take the first frame.
+    const out = Array.isArray(result) ? result[0] : result;
+    if (!out || out.size === 0) throw new Error("empty conversion output");
     const jpegName = file.name.replace(/\.(heic|heif)$/i, ".jpg");
-    return new File([out], jpegName, { type: "image/jpeg" });
-  } catch {
-    return file;
+    return { file: new File([out], jpegName, { type: "image/jpeg" }), wasHeic: true, converted: true };
+  } catch (e) {
+    return {
+      file,
+      wasHeic: true,
+      converted: false,
+      error: e instanceof Error ? e.message : "HEIC conversion failed",
+    };
   }
 }

@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { UploadCloud, X, FileText, Play } from "lucide-react";
 import type { MediaItem } from "@/lib/store";
-import { toJpegIfHeic } from "@/lib/heic";
+import { convertHeic } from "@/lib/heic";
 
 // Multi-file uploader for photos, videos and PDFs. Each file is read to a
 // base64 data URL and added to the gallery, so several can be attached to one
@@ -44,16 +44,32 @@ export function MediaUpload({
     e.target.value = ""; // allow re-picking the same files
     if (files.length === 0) return;
 
-    const tooBig = files.filter((f) => f.size > maxMb * 1024 * 1024).map((f) => f.name);
+    // Convert HEIC → JPEG FIRST (iPhone photos), collecting any that fail so we
+    // can tell the user instead of silently storing an unviewable file.
+    const failed: string[] = [];
+    const converted = await Promise.all(
+      files.map(async (raw) => {
+        const r = await convertHeic(raw);
+        if (r.wasHeic && !r.converted) failed.push(raw.name);
+        return r.file;
+      })
+    );
+
+    // Size-check AFTER conversion (the JPEG can be larger than the source HEIC).
+    const tooBig = converted.filter((f) => f.size > maxMb * 1024 * 1024).map((f) => f.name);
     if (tooBig.length) {
       alert(`These files are over ${maxMb} MB and were skipped:\n${tooBig.join("\n")}`);
     }
-    const ok = files.filter((f) => f.size <= maxMb * 1024 * 1024);
+    if (failed.length) {
+      alert(
+        `Couldn't convert these iPhone HEIC photos (they'll upload but may not preview):\n${failed.join("\n")}\n\nTip: on iPhone, Settings → Camera → Formats → "Most Compatible" saves as JPEG.`
+      );
+    }
+    const ok = converted.filter((f) => f.size <= maxMb * 1024 * 1024);
 
-    // Convert HEIC → JPEG where needed, then read each to a base64 data URL.
+    // Read each to a base64 data URL.
     const picked = await Promise.all(
-      ok.map(async (raw) => {
-        const file = await toJpegIfHeic(raw);
+      ok.map(async (file) => {
         const data = await readAsDataUrl(file);
         return {
           id: uid("media"),
