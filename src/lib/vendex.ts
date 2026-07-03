@@ -236,7 +236,14 @@ async function searchViaSerpApi(imageUrl: string): Promise<RankCandidate[]> {
   });
   if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(`SerpAPI: ${data.error}`);
+  if (data.error) {
+    // "hasn't returned any results" is a NORMAL no-match outcome, not an outage —
+    // return empty so the caller shows the friendly "no matches for that photo"
+    // guidance instead of a scary "temporarily unavailable" error. Only genuine
+    // failures (bad key, quota, invalid request) throw.
+    if (/hasn'?t returned any results|no results/i.test(String(data.error))) return [];
+    throw new Error(`SerpAPI: ${data.error}`);
+  }
   const matches: Record<string, unknown>[] = Array.isArray(data.visual_matches) ? data.visual_matches : [];
 
   // Google Lens returns many non-shopping matches (blogs, social, image pages).
@@ -381,7 +388,7 @@ export async function searchSuppliersByImage(
       // Lens ran but found nothing for this photo. If Vendex isn't configured,
       // tell the user honestly rather than showing mock data as if it were real.
       if (!process.env.VENDEX_API_URL) {
-        return { ok: false, mock: false, suppliers: [], error: "No matches for that photo. Try a clearer, well-lit shot of just the product on a plain background." };
+        return { ok: false, mock: false, suppliers: [], error: "No product matches for that photo. Google Lens couldn't recognise it — this happens with plain/generic items (like a plain glass bottle). Try a clearer, well-lit shot of just the product on a white background, or paste an Alibaba/reel link instead." };
       }
       // else fall through to the Vendex attempt
     } catch (e) {
