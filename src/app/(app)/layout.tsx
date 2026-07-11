@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/sidebar";
+import { MobileNav } from "@/components/mobile-nav";
 import { StoreProvider } from "@/lib/store";
 
 // This whole group is authenticated and data-driven (every page redirects to
@@ -15,9 +16,12 @@ export default function AppLayout({
 }) {
   return (
     <StoreProvider>
+      {/* Mobile-only slide-out nav (desktop uses the sidebar). */}
+      <MobileNav />
       <div className="app-bg flex min-h-screen">
         <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        {/* pt on mobile clears the fixed hamburger header; none on desktop. */}
+        <div className="flex min-w-0 flex-1 flex-col pt-14 lg:pt-0">{children}</div>
       </div>
     </StoreProvider>
   );
