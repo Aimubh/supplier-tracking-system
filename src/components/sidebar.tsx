@@ -97,33 +97,39 @@ export function Sidebar() {
                 <Link
                   href={href}
                   className={clsx(
-                    "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition",
+                    // rounded-full = pill shape; group/pill scopes the hover glow.
+                    "group/pill relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] transition-colors",
                     active
                       ? "text-white"
-                      : "text-body hover:bg-surface hover:text-ink"
+                      : "text-body hover:text-ink"
                   )}
                 >
+                  {/* Active pill — slides between tabs via the shared layoutId. */}
                   {active &&
                     (reduce ? (
-                      <span className="absolute inset-0 -z-10 rounded-md bg-ink" />
+                      <span className="absolute inset-0 -z-10 rounded-full bg-ink" />
                     ) : (
                       <motion.span
                         layoutId="nav-active"
-                        transition={{ type: "spring", stiffness: 500, damping: 36 }}
-                        className="absolute inset-0 -z-10 rounded-md bg-ink"
+                        transition={{ type: "spring", stiffness: 480, damping: 34 }}
+                        className="absolute inset-0 -z-10 rounded-full bg-ink shadow-lift"
                       />
                     ))}
+                  {/* Hover glow — a soft pill that fades in on hover for inactive tabs. */}
+                  {!active && (
+                    <span className="absolute inset-0 -z-10 scale-95 rounded-full bg-surface opacity-0 transition-all duration-200 group-hover/pill:scale-100 group-hover/pill:opacity-100" />
+                  )}
                   <Icon
                     className={clsx(
                       "h-4 w-4 transition-colors",
-                      active ? "text-white" : "text-muted group-hover:text-ink"
+                      active ? "text-white" : "text-muted group-hover/pill:text-ink"
                     )}
                   />
                   <span className={clsx("flex-1", active && "font-medium")}>{tab.label}</span>
                   {subSteps.length > 0 && (
                     <span
                       className={clsx(
-                        "figure rounded px-1.5 py-0.5 text-[11px]",
+                        "figure rounded-full px-1.5 py-0.5 text-[11px]",
                         active ? "bg-white/15 text-white" : "text-line-strong"
                       )}
                     >
@@ -190,8 +196,8 @@ export function Sidebar() {
           <Link
             href="/users"
             className={clsx(
-              "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition",
-              pathname === "/users" ? "bg-ink text-white" : "text-body hover:bg-surface hover:text-ink"
+              "flex w-full items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] transition",
+              pathname === "/users" ? "bg-ink text-white shadow-lift" : "text-body hover:bg-surface hover:text-ink"
             )}
           >
             <Users className={clsx("h-4 w-4", pathname === "/users" ? "text-white" : "text-muted")} />
@@ -200,8 +206,8 @@ export function Sidebar() {
           <Link
             href="/settings"
             className={clsx(
-              "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition",
-              pathname === "/settings" ? "bg-ink text-white" : "text-body hover:bg-surface hover:text-ink"
+              "flex w-full items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] transition",
+              pathname === "/settings" ? "bg-ink text-white shadow-lift" : "text-body hover:bg-surface hover:text-ink"
             )}
           >
             <Settings className={clsx("h-4 w-4", pathname === "/settings" ? "text-white" : "text-muted")} />

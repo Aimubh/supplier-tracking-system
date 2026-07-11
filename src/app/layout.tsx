@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import { AuthSessionProvider } from "@/components/session-provider";
+import { ClickSpark } from "@/components/click-spark";
 
 // Body + display run the same Inter family at modest weights — the Airtable
 // system prefers size and color contrast over heavy weight. Inter is the
@@ -44,7 +45,18 @@ export default function RootLayout({
       className={`${inter.variable} ${interTight.variable} ${interMono.variable}`}
     >
       <body className="min-h-screen bg-base font-body text-body antialiased">
-        <AuthSessionProvider>{children}</AuthSessionProvider>
+        {/* Decorative click-spark cursor effect (ink sparks on a light bg). */}
+        <ClickSpark
+          sparkColor="#15130E"
+          sparkSize={10}
+          sparkRadius={15}
+          sparkCount={8}
+          duration={400}
+          easing="ease-out"
+          extraScale={1}
+        >
+          <AuthSessionProvider>{children}</AuthSessionProvider>
+        </ClickSpark>
       </body>
     </html>
   );
