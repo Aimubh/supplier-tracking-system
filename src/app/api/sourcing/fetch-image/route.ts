@@ -11,9 +11,14 @@
 import { NextResponse } from "next/server";
 import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 import { enrichScraped, type ScrapedProduct } from "@/lib/sourcing-enrich";
-import { searchSuppliersByImage } from "@/lib/vendex";
+import { searchSuppliersByImage, hostImage } from "@/lib/vendex";
 import type { RankCandidate } from "@/lib/supplier-ranking";
-import { suggestSearchQueries, openRouterConfigured } from "@/lib/openrouter";
+import {
+  suggestSearchQueries,
+  openRouterConfigured,
+  identifyProductFromImage,
+  pickBestSupplier,
+} from "@/lib/openrouter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -52,17 +57,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Image too large (max 8 MB)." }, { status: 400 });
   }
 
-  // 2) If we have a product label, ask the free OpenRouter model for search
-  //    keywords — they tag the cache so future text searches can reuse the
-  //    results, and improve matching.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  // 2) FREE VISION: identify the product from the image (openrouter/free) — item
+  //    name, colour, material, keywords + HSN. Costs nothing, and gives better
+  //    search terms than a label alone. Falls back to the label if unavailable.
   let keywords: string[] = [];
-  if (label && openRouterConfigured()) {
-    const hint = await suggestSearchQueries(label);
-    if (hint) keywords = hint.keywords;
+  let vision: Awaited<ReturnType<typeof identifyProductFromImage>> = null;
+  if (openRouterConfigured()) {
+    try {
+      const imageUrl = await hostImage(bytes, file.type || "image/jpeg");
+      vision = await identifyProductFromImage(imageUrl);
+    } catch {
+      /* vision is best-effort */
+    }
+    if (vision?.keywords.length) keywords = vision.keywords;
+    // If vision failed but we have a text label, still get keywords from it.
+    if (keywords.length === 0 && label) {
+      const hint = await suggestSearchQueries(label);
+      if (hint) keywords = hint.keywords;
+    }
   }
 
   // 3) Search suppliers by image (cache-first, then hosts + live search).
-  const bytes = new Uint8Array(await file.arrayBuffer());
   const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg", keywords);
 
   if (!result.ok || result.suppliers.length === 0) {
@@ -72,9 +89,31 @@ export async function POST(req: Request) {
     );
   }
 
-  // 3) Pick the best supplier to auto-fill and enrich it into SKU inputs.
-  const top = pickRepresentative(result.suppliers);
+  // 4) SMART PICK: let the free model choose the best supplier (price vs reviews
+  //    vs country). Fall back to the cheapest-representative if it can't.
+  let top = pickRepresentative(result.suppliers);
+  let pickReason = "";
+  if (openRouterConfigured() && result.suppliers.length > 1) {
+    const pick = await pickBestSupplier(
+      result.suppliers.map((s) => ({
+        name: s.name, priceUsd: s.priceUsd, reviews: s.reviews, rating: s.rating, country: s.country,
+      }))
+    );
+    if (pick) {
+      top = result.suppliers[pick.index];
+      pickReason = pick.reason;
+    }
+  }
+
+  // 5) Enrich the chosen supplier into SKU inputs, folding in the vision identity
+  //    (item name / colour / dimension) so the form auto-fills richer.
   const enriched = enrichScraped(toScraped(top));
+  if (vision) {
+    if (!enriched.inputs.itemName && vision.itemName) enriched.inputs.itemName = vision.itemName;
+    if (!enriched.inputs.colour && vision.colour) enriched.inputs.colour = vision.colour;
+    if (!enriched.inputs.size && vision.dimension) enriched.inputs.size = vision.dimension;
+    if (!enriched.inputs.hsnCode && vision.hsn) enriched.inputs.hsnCode = vision.hsn;
+  }
 
   // Lens/retail results aren't Alibaba wholesale FOB — flag so the FOB field
   // isn't mistaken for a factory quote.
@@ -83,9 +122,11 @@ export async function POST(req: Request) {
   return NextResponse.json({
     supplierCount: result.suppliers.length,
     lowConfidence: isRetail,
-    note: result.note ?? (isRetail
-      ? "Shown from Google Lens (retail prices, not Alibaba wholesale FOB). Treat FOB as approximate."
-      : ""),
+    note: [
+      result.note ?? (isRetail ? "Shown from Google Lens (retail prices, not Alibaba wholesale FOB). Treat FOB as approximate." : ""),
+      pickReason ? `Best pick: ${pickReason}` : "",
+      vision?.itemName ? `Identified by AI: ${vision.itemName}` : "",
+    ].filter(Boolean).join(" · "),
     inputs: enriched.inputs,
     flags: enriched.flags,
     raw: {

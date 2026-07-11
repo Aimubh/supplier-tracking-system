@@ -137,7 +137,7 @@ async function uploadCatbox(bytes: Uint8Array, mime: string, ext: string): Promi
   } catch { return null; }
 }
 
-async function hostImage(bytes: Uint8Array, mime: string): Promise<string> {
+export async function hostImage(bytes: Uint8Array, mime: string): Promise<string> {
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
   // PRIMARY: ImgBB (reliable, keyed). Then free hosts as best-effort fallback.
   const imgbb = await uploadImgbb(bytes);
