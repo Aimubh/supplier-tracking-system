@@ -102,3 +102,44 @@ model Manufacturer {
   @@index([type])
   @@index([createdAt])
 }
+
+// Two-tier supplier-search cache. Tier 1 (collector): every product returned by a
+// live supplier search (TMAPI / Lens) is stored here, tagged with the query that
+// found it. Tier 2 (server): a new search checks this cache FIRST (by query hash,
+// then keyword/title text, then image hash) and only calls the paid API when the
+// cache can't satisfy the request — so repeat/similar searches cost nothing.
+//
+// This is a cache, not business data: rows are disposable and can be pruned by
+// age. One row per (source product URL) per platform, deduped on `dedupeKey`.
+model CachedProduct {
+  id          String   @id @default(uuid())
+
+  // How this row was found — used for Tier-2 lookups.
+  queryHash   String   @default("") // hash of the exact query/image that fetched it
+  keywords    String   @default("") // space-joined search terms (lowercased)
+  imageHash   String   @default("") // perceptual/size hash of the source image (if any)
+
+  // The product itself — mirrors RankCandidate (src/lib/supplier-ranking.ts).
+  title       String   @default("")
+  supplierName String  @default("")
+  priceUsd    Float?
+  priceInr    Float?
+  reviews     Int      @default(0)
+  rating      Float    @default(0)
+  country     String   @default("")
+  url         String   @default("") // product page — also the natural dedupe id
+  image       String   @default("") // thumbnail URL
+  platform    String   @default("") // "1688" | "google_lens" | …
+
+  // Dedupe: platform + product url. Upsert on this so re-fetches refresh, not duplicate.
+  dedupeKey   String   @unique
+
+  hitCount    Int      @default(0) // times this row was served from cache
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([queryHash])
+  @@index([imageHash])
+  @@index([platform])
+  @@index([createdAt])
+}

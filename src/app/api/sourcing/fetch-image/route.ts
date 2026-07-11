@@ -13,6 +13,7 @@ import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 import { enrichScraped, type ScrapedProduct } from "@/lib/sourcing-enrich";
 import { searchSuppliersByImage } from "@/lib/vendex";
 import type { RankCandidate } from "@/lib/supplier-ranking";
+import { suggestSearchQueries, openRouterConfigured } from "@/lib/openrouter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -51,10 +52,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Image too large (max 8 MB)." }, { status: 400 });
   }
 
-  // 2) Search suppliers by image (hosts the image + searches — Vercel-safe).
+  // 2) If we have a product label, ask the free OpenRouter model for search
+  //    keywords — they tag the cache so future text searches can reuse the
+  //    results, and improve matching.
+  let keywords: string[] = [];
+  if (label && openRouterConfigured()) {
+    const hint = await suggestSearchQueries(label);
+    if (hint) keywords = hint.keywords;
+  }
+
+  // 3) Search suppliers by image (cache-first, then hosts + live search).
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg");
-  void label;
+  const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg", keywords);
 
   if (!result.ok || result.suppliers.length === 0) {
     return NextResponse.json(

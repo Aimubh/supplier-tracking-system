@@ -11,6 +11,7 @@
 // without the scraper service running.
 
 import type { RankCandidate } from "./supplier-ranking";
+import { lookupCache, saveToCache, hashBytes } from "./supplier-cache";
 
 const VENDEX = process.env.VENDEX_API_URL ?? "http://127.0.0.1:8001";
 const VENDEX_TOKEN = process.env.VENDEX_API_TOKEN ?? "";
@@ -344,10 +345,23 @@ async function searchViaTmapi(imageUrl: string): Promise<RankCandidate[]> {
 // Priority: TMAPI 1688 wholesale → SerpAPI Lens retail → Vendex → mock.
 export async function searchSuppliersByImage(
   bytes: Uint8Array,
-  mime: string
+  mime: string,
+  keywords: string[] = []
 ): Promise<SupplierSearchResult> {
   if (mockForced()) {
     return { ok: true, mock: true, suppliers: mockSuppliers(), note: "Mock data (BOT_MOCK_SUPPLIERS=1)." };
+  }
+
+  // ── TIER 2: try the cache first (same image, or matching keywords) ───────────
+  const imageHash = hashBytes(bytes);
+  const cached = await lookupCache({ imageHash, keywords });
+  if (cached.length > 0) {
+    return {
+      ok: true,
+      mock: false,
+      suppliers: cached,
+      note: "From the local supplier cache (previously fetched) — no new API call used.",
+    };
   }
 
   // PRIMARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
@@ -356,6 +370,7 @@ export async function searchSuppliersByImage(
       const imageUrl = await hostImage(bytes, mime);
       const suppliers = await searchViaTmapi(imageUrl);
       if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
         return {
           ok: true,
           mock: false,
@@ -375,6 +390,7 @@ export async function searchSuppliersByImage(
       const imageUrl = await hostImage(bytes, mime);
       const suppliers = await searchViaSerpApi(imageUrl);
       if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
         const anyPriced = suppliers.some((s) => s.priceUsd != null);
         return {
           ok: true,
@@ -440,6 +456,7 @@ export async function searchSuppliersByImage(
     if (raw.length === 0) return { ok: false, mock: false, suppliers: [], error: "No matching suppliers found for that image." };
 
     const suppliers = raw.slice(0, 20).map(toCandidate);
+    await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
     const isRetail = suppliers.every((s) => s.platform === "google_lens");
     return {
       ok: true,
