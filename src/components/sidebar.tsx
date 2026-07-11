@@ -19,7 +19,8 @@ import {
 import { signOut } from "next-auth/react";
 import { TABS, TAB_STEPS, type TabKey, canAccess } from "@/lib/access";
 import { useCurrentUser } from "@/lib/use-current-user";
-import { motion, AnimatePresence, staggerParent, riseItem, useReducedMotion } from "./motion";
+import { motion, AnimatePresence, useReducedMotion } from "./motion";
+import { LineSidebar, type LineSidebarItem } from "./line-sidebar";
 
 const TAB_ICON: Record<TabKey, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
@@ -40,12 +41,78 @@ export function Sidebar() {
 
   if (!user) return null; // session still loading
 
+  // Build the proximity-reactive item list. Each row's `content` is the full
+  // Link (icon + label + badge) or a locked placeholder — so LineSidebar's
+  // marker/shift effect wraps our existing gated navigation, not a bare label.
+  const visibleTabs = TABS;
+  const items: LineSidebarItem[] = visibleTabs.map((tab) => {
+    const Icon = TAB_ICON[tab.key];
+    const href = `/${tab.key}`;
+    const active = pathname === href;
+    const allowed = canAccess(user, tab.key);
+    const subSteps = TAB_STEPS[tab.key] ?? [];
+
+    if (!allowed) {
+      return {
+        label: tab.label,
+        disabled: true,
+        content: (
+          <div
+            title="No access — ask an admin"
+            className="flex cursor-not-allowed items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] text-line-strong"
+          >
+            <Icon className="h-4 w-4" />
+            <span className="flex-1">{tab.label}</span>
+            <Lock className="h-3.5 w-3.5" />
+          </div>
+        ),
+      };
+    }
+
+    return {
+      label: tab.label,
+      content: (
+        <Link
+          href={href}
+          className={clsx(
+            "group/pill relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] transition-colors",
+            active ? "text-white" : "text-body hover:text-ink"
+          )}
+        >
+          {active && (
+            <span className="absolute inset-0 -z-10 rounded-full bg-ink shadow-lift" />
+          )}
+          <Icon
+            className={clsx(
+              "h-4 w-4 transition-colors",
+              active ? "text-white" : "text-muted group-hover/pill:text-ink"
+            )}
+          />
+          <span className={clsx("flex-1", active && "font-medium")}>{tab.label}</span>
+          {subSteps.length > 0 && (
+            <span
+              className={clsx(
+                "figure rounded-full px-1.5 py-0.5 text-[11px]",
+                active ? "bg-white/15 text-white" : "text-line-strong"
+              )}
+            >
+              {subSteps.length}
+            </span>
+          )}
+        </Link>
+      ),
+    };
+  });
+
+  const activeIndex = visibleTabs.findIndex((t) => pathname === `/${t.key}`);
+  const activeTab = visibleTabs[activeIndex];
+  const activeSubSteps = activeTab ? TAB_STEPS[activeTab.key] ?? [] : [];
+
   return (
     <aside className="sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col border-r border-line bg-white lg:flex">
       {/* Masthead */}
       <div className="flex items-center gap-3 px-5 py-5">
         <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink p-2 text-white">
-          {/* Lazer Believe mark */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/lazer-mark.svg" alt="Lazer Believe" className="h-full w-full brightness-0 invert" />
         </span>
@@ -57,137 +124,69 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Nav */}
-      <motion.nav
-        className="flex flex-col gap-0.5 px-3 py-2"
-        variants={reduce ? undefined : staggerParent}
-        initial={reduce ? undefined : "hidden"}
-        animate={reduce ? undefined : "show"}
-      >
+      {/* Nav — LineSidebar proximity effect wrapping the gated tabs */}
+      <div className="px-3 py-2">
         <p className="eyebrow px-2 pb-2">Workspace</p>
-        {TABS.map((tab) => {
-          const Icon = TAB_ICON[tab.key];
-          const href = `/${tab.key}`;
-          const active = pathname === href;
-          const allowed = canAccess(user, tab.key);
+        <LineSidebar
+          items={items}
+          activeIndex={activeIndex >= 0 ? activeIndex : null}
+          accentColor="#15130e"
+          textColor="#333840"
+          markerColor="#9297a0"
+          markerLength={20}
+          markerGap={6}
+          maxShift={8}
+          itemGap={2}
+          proximityRadius={100}
+          smoothing={120}
+        />
 
-          if (!allowed) {
-            return (
-              <motion.div
-                key={tab.key}
-                variants={reduce ? undefined : riseItem}
-                title="No access — ask an admin"
-                className="flex cursor-not-allowed items-center gap-3 rounded-md px-3 py-2.5 text-[14px] text-line-strong"
-              >
-                <Icon className="h-4 w-4" />
-                <span className="flex-1">{tab.label}</span>
-                <Lock className="h-3.5 w-3.5" />
-              </motion.div>
-            );
-          }
-
-          const subSteps = TAB_STEPS[tab.key] ?? [];
-
-          return (
-            <motion.div key={tab.key} variants={reduce ? undefined : riseItem}>
-              <motion.div
-                whileHover={reduce || active ? undefined : { x: 2 }}
-                transition={{ type: "spring", stiffness: 500, damping: 30 }}
-              >
-                <Link
-                  href={href}
-                  className={clsx(
-                    // rounded-full = pill shape; group/pill scopes the hover glow.
-                    "group/pill relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] transition-colors",
-                    active
-                      ? "text-white"
-                      : "text-body hover:text-ink"
-                  )}
-                >
-                  {/* Active pill — slides between tabs via the shared layoutId. */}
-                  {active &&
-                    (reduce ? (
-                      <span className="absolute inset-0 -z-10 rounded-full bg-ink" />
-                    ) : (
-                      <motion.span
-                        layoutId="nav-active"
-                        transition={{ type: "spring", stiffness: 480, damping: 34 }}
-                        className="absolute inset-0 -z-10 rounded-full bg-ink shadow-lift"
-                      />
-                    ))}
-                  {/* Hover glow — a soft pill that fades in on hover for inactive tabs. */}
-                  {!active && (
-                    <span className="absolute inset-0 -z-10 scale-95 rounded-full bg-surface opacity-0 transition-all duration-200 group-hover/pill:scale-100 group-hover/pill:opacity-100" />
-                  )}
-                  <Icon
-                    className={clsx(
-                      "h-4 w-4 transition-colors",
-                      active ? "text-white" : "text-muted group-hover/pill:text-ink"
-                    )}
-                  />
-                  <span className={clsx("flex-1", active && "font-medium")}>{tab.label}</span>
-                  {subSteps.length > 0 && (
-                    <span
+        {/* Nested sub-tabs — auto-expand for the active tab (below the list). */}
+        <AnimatePresence initial={false}>
+          {activeTab && activeSubSteps.length > 0 && (
+            <motion.ul
+              key={`${activeTab.key}-sub`}
+              initial={reduce ? false : { height: 0, opacity: 0 }}
+              animate={reduce ? {} : { height: "auto", opacity: 1 }}
+              exit={reduce ? {} : { height: 0, opacity: 0 }}
+              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              className="ml-6 mt-1 overflow-hidden border-l border-line pl-1"
+            >
+              {activeSubSteps.map((s, i) => {
+                const stepActive = s.n === activeStep;
+                return (
+                  <motion.li
+                    key={s.n}
+                    initial={reduce ? false : { opacity: 0, x: -6 }}
+                    animate={reduce ? {} : { opacity: 1, x: 0 }}
+                    transition={{ delay: reduce ? 0 : 0.04 + i * 0.03 }}
+                  >
+                    <Link
+                      href={`/${activeTab.key}?step=${s.n}`}
+                      scroll={false}
                       className={clsx(
-                        "figure rounded-full px-1.5 py-0.5 text-[11px]",
-                        active ? "bg-white/15 text-white" : "text-line-strong"
+                        "group relative flex items-center gap-2 rounded-md py-2 pl-3 pr-2 text-[13.5px] transition",
+                        stepActive
+                          ? "font-medium text-ink"
+                          : "text-muted hover:bg-surface hover:text-ink"
                       )}
                     >
-                      {subSteps.length}
-                    </span>
-                  )}
-                </Link>
-              </motion.div>
-
-              {/* Nested sub-tabs — auto-expand for the active tab */}
-              <AnimatePresence initial={false}>
-                {active && subSteps.length > 0 && (
-                  <motion.ul
-                    key={`${tab.key}-sub`}
-                    initial={reduce ? false : { height: 0, opacity: 0 }}
-                    animate={reduce ? {} : { height: "auto", opacity: 1 }}
-                    exit={reduce ? {} : { height: 0, opacity: 0 }}
-                    transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                    className="ml-5 mt-0.5 overflow-hidden border-l border-line pl-1"
-                  >
-                    {subSteps.map((s, i) => {
-                      const stepActive = s.n === activeStep;
-                      return (
-                        <motion.li
-                          key={s.n}
-                          initial={reduce ? false : { opacity: 0, x: -6 }}
-                          animate={reduce ? {} : { opacity: 1, x: 0 }}
-                          transition={{ delay: reduce ? 0 : 0.04 + i * 0.03 }}
-                        >
-                          <Link
-                            href={`${href}?step=${s.n}`}
-                            scroll={false}
-                            className={clsx(
-                              "group relative flex items-center gap-2 rounded-md py-2 pl-3 pr-2 text-[13.5px] transition",
-                              stepActive
-                                ? "font-medium text-ink"
-                                : "text-muted hover:bg-surface hover:text-ink"
-                            )}
-                          >
-                            <span
-                              className={clsx(
-                                "absolute -left-[5px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full transition",
-                                stepActive ? "bg-ink" : "bg-line-strong group-hover:bg-muted"
-                              )}
-                            />
-                            <span className="flex-1 truncate">{s.title}</span>
-                            {s.gate && <span className="h-1.5 w-1.5 rounded-full bg-pending" />}
-                          </Link>
-                        </motion.li>
-                      );
-                    })}
-                  </motion.ul>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          );
-        })}
-      </motion.nav>
+                      <span
+                        className={clsx(
+                          "absolute -left-[5px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full transition",
+                          stepActive ? "bg-ink" : "bg-line-strong group-hover:bg-muted"
+                        )}
+                      />
+                      <span className="flex-1 truncate">{s.title}</span>
+                      {s.gate && <span className="h-1.5 w-1.5 rounded-full bg-pending" />}
+                    </Link>
+                  </motion.li>
+                );
+              })}
+            </motion.ul>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Admin */}
       {user.role === "ADMIN" && (

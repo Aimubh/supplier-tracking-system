@@ -1,0 +1,85 @@
+.line-sidebar {
+  --accent-color: #15130e;
+  --text-color: #333840;
+  --marker-color: #9297a0;
+  --marker-length: 22px;
+  --marker-gap: 8px;
+  --tick-scale: 0.5;
+  --max-shift: 10px;
+  --item-gap: 2px;
+  --smoothing: 120ms;
+
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.line-sidebar--markers {
+  padding-left: calc(var(--marker-length) + var(--marker-gap));
+}
+
+.line-sidebar__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--item-gap);
+}
+
+/* --effect (0..1) is driven per item by a rAF lerp in JS, so every derived
+   property below reads the same continuously-animating value and stays in step. */
+.line-sidebar__item {
+  position: relative;
+  cursor: pointer;
+}
+
+.line-sidebar__item--disabled {
+  cursor: not-allowed;
+}
+
+.line-sidebar__label {
+  position: relative;
+  display: block;
+  width: 100%;
+  transform: translateX(calc(var(--effect, 0) * var(--max-shift)));
+}
+
+/* Leading marker line — grows + colours toward the accent on proximity. */
+.line-sidebar__marker {
+  position: absolute;
+  top: 50%;
+  left: calc(-1 * var(--marker-length) - var(--marker-gap));
+  height: 1px;
+  width: var(--marker-length);
+  background-color: color-mix(
+    in srgb,
+    var(--accent-color) calc(var(--effect, 0) * 100%),
+    var(--marker-color)
+  );
+  transform-origin: left center;
+  transform: translateY(-50%) scaleX(calc(0.7 + var(--effect, 0) * 0.5));
+  pointer-events: none;
+}
+
+/* Short static tick centered in the gap between two items. */
+.line-sidebar--markers .line-sidebar__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + var(--item-gap) / 2);
+  left: calc(-1 * var(--marker-length) - var(--marker-gap));
+  height: 1px;
+  width: calc(var(--marker-length) * var(--tick-scale));
+  background-color: var(--marker-color);
+  opacity: 0.4;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* When enabled, the in-between ticks grow with cursor proximity too. */
+.line-sidebar--scale-tick .line-sidebar__item:not(:last-child)::after {
+  transform-origin: left center;
+  transform: translateY(-50%) scaleX(calc(0.7 + var(--effect, 0) * 0.6));
+}
