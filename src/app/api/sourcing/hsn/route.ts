@@ -11,6 +11,7 @@
 import { NextResponse } from "next/server";
 import { requireTabAccess, PRODUCT_TABS } from "@/lib/api-guard";
 import { suggestHsn } from "@/lib/hsn-advisor";
+import { suggestSearchQueries, openRouterConfigured } from "@/lib/openrouter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -36,21 +37,38 @@ export async function POST(req: Request) {
   // (HSN matching runs on the product text directly — fast, offline, no API.)
   void imageUrl;
 
-  const text = `${name} ${description}`.trim();
+  let text = `${name} ${description}`.trim();
   if (!text && !material) {
     return NextResponse.json({ error: "Provide a product name or description." }, { status: 400 });
+  }
+
+  // Enrich with the free OpenRouter (Tencent) model: it suggests the material and
+  // extra keywords, which sharpen the offline HSN keyword match — especially when
+  // the product name alone is vague. Best-effort; never blocks the response.
+  let aiHint: { keywords: string[]; hsn: string; material: string } | null = null;
+  if (openRouterConfigured()) {
+    aiHint = await suggestSearchQueries(name || text, description);
+    if (aiHint) {
+      if (!material && aiHint.material) material = aiHint.material;
+      // Fold the AI keywords into the text so suggestHsn has more signal.
+      if (aiHint.keywords.length) text = `${text} ${aiHint.keywords.join(" ")}`.trim();
+    }
   }
 
   const candidates = suggestHsn(text, material, 3);
   if (candidates.length === 0) {
     return NextResponse.json({
       candidates: [],
+      aiKeywords: aiHint?.keywords ?? [],
+      aiHsn: aiHint?.hsn ?? "",
       note: "No confident HSN match — describe the product's material and use, then retry or check ICEGATE.",
     });
   }
 
   return NextResponse.json({
     candidates,
+    aiKeywords: aiHint?.keywords ?? [], // free-model Alibaba search terms
+    aiHsn: aiHint?.hsn ?? "", // free-model's own HSN guess (for cross-check)
     note: "Advisory only — confirm the correct code + current rate on ICEGATE / with your CHA before ordering.",
   });
 }
