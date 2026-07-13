@@ -83,7 +83,7 @@ export function DirectoryView() {
   }
 
   return (
-    <div className="space-y-5">
+    <main className="space-y-5 px-7 py-6">
       {/* Summary tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Tile label="Total contacts" value={counts.total} />
@@ -171,7 +171,7 @@ export function DirectoryView() {
           />
         )}
       </AnimatePresence>
-    </div>
+    </main>
   );
 }
 
