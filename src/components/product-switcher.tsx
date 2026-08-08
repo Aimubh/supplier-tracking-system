@@ -87,7 +87,9 @@ export function ProductSwitcher() {
               />
               <button
                 onClick={commit}
-                className="rounded-lg bg-ink px-3 text-[12px] font-semibold text-white"
+                disabled={!name.trim()}
+                title={name.trim() ? "Add product" : "Type a product name first"}
+                className="rounded-lg bg-ink px-3 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Add
               </button>
