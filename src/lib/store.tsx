@@ -910,8 +910,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The name is optional — an unnamed product is a valid starting point and
+  // adopts the Pre-Order "Item name" when that's first saved.
   const addProduct = useCallback((name: string) => {
-    const p = blankProduct(name || "Untitled product");
+    const p = blankProduct(name);
     setProducts((prev) => [...prev, p]);
     setActiveIdState(p.id);
     void createProduct(p);

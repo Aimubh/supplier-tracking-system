@@ -649,6 +649,11 @@ export function SourcingPanel() {
         saved={saved}
         onSave={() => {
           patch("sourcing", draft);
+          // Products added straight from "+ New" can be unnamed, and nothing
+          // else in the app can name one. The SKU identity is that name, so
+          // adopt it the first time it's saved.
+          const itemName = draft.inputs.itemName.trim();
+          if (!active.name.trim() && itemName) patch("name", itemName);
           flashSaved();
         }}
         onDiscard={discard}
