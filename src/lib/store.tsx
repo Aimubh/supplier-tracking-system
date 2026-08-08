@@ -783,6 +783,13 @@ function apiSend(method: "POST" | "PATCH" | "DELETE", url: string, body?: unknow
   });
 }
 
+// Human-readable reason a write was refused, e.g. failMessage(403, "add products").
+function failMessage(status: number, action: string, verb: string) {
+  if (status === 403) return `You don't have permission to ${action}.`;
+  if (status === 401) return "Your session expired — please sign in again.";
+  return `${verb} failed (HTTP ${status}).`;
+}
+
 // Per-entity debounced PATCH so rapid edits collapse into one network write.
 function useDebouncedSaver(delay = 600) {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -878,21 +885,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void ensureFull(id);
   }, [ensureFull]);
 
+  // POST a new product. Optimistic row is rolled back (and the user told why) if
+  // the server rejects it — otherwise a failed create looks like it worked until
+  // the next reload, when the product silently disappears.
+  const createProduct = useCallback(async (p: Product) => {
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(p),
+      });
+      if (res.ok) return;
+      throw new Error(failMessage(res.status, "add products", "Create"));
+    } catch (err) {
+      setProducts((prev) => prev.filter((x) => x.id !== p.id));
+      setActiveIdState((cur) => (cur === p.id ? null : cur));
+      if (typeof window !== "undefined") {
+        window.alert(
+          err instanceof Error && err.message
+            ? err.message
+            : "Create failed — network error. Please try again."
+        );
+      }
+    }
+  }, []);
+
   const addProduct = useCallback((name: string) => {
     const p = blankProduct(name || "Untitled product");
     setProducts((prev) => [...prev, p]);
     setActiveIdState(p.id);
-    apiSend("POST", "/api/products", p);
-  }, []);
+    void createProduct(p);
+  }, [createProduct]);
 
   // Persist a pre-built product (QR Generator path). Caller has already shaped it
   // (sample approved, pre-order skipped, etc.). Makes it the active product.
   const addProductFull = useCallback((product: Product) => {
     setProducts((prev) => [...prev, product]);
     setActiveIdState(product.id);
-    apiSend("POST", "/api/products", product);
+    void createProduct(product);
     return product.id;
-  }, []);
+  }, [createProduct]);
 
   const removeProduct = useCallback(async (id: string) => {
     // Snapshot for rollback if the server rejects the delete.
@@ -907,12 +939,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!res.ok) {
         // Server refused (auth/other). Put the product back and tell the user.
         setProducts(snapshot);
-        const msg = res.status === 403
-          ? "You don't have permission to delete products."
-          : res.status === 401
-          ? "Your session expired — please sign in again."
-          : `Delete failed (HTTP ${res.status}).`;
-        if (typeof window !== "undefined") window.alert(msg);
+        if (typeof window !== "undefined") {
+          window.alert(failMessage(res.status, "delete products", "Delete"));
+        }
       }
     } catch {
       // Network error — restore and warn.
