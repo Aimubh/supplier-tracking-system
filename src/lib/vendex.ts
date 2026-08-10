@@ -142,16 +142,38 @@ async function uploadCatbox(bytes: Uint8Array, mime: string, ext: string): Promi
   } catch { return null; }
 }
 
+// A host can "succeed" and still hand back a URL that serves an HTML page —
+// tmpfiles.org's /dl/ link now 302s to its viewer page and returns text/html.
+// The search APIs fetch this URL themselves and reject it as an invalid image,
+// which surfaced as an unexplained "no matching suppliers". So confirm the URL
+// really serves an image before trusting it, and move to the next host if not.
+async function servesAnImage(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return false;
+    return (res.headers.get("content-type") ?? "").toLowerCase().startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
 export async function hostImage(bytes: Uint8Array, mime: string): Promise<string> {
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
   // PRIMARY: ImgBB (reliable, keyed). Then free hosts as best-effort fallback.
   const imgbb = await uploadImgbb(bytes);
   if (imgbb) return imgbb;
+  const rejected: string[] = [];
   for (const upload of [uploadLitterbox, uploadTmpfiles, uploadCatbox]) {
     const url = await upload(bytes, mime, ext);
-    if (url) return url;
+    if (!url) continue;
+    if (await servesAnImage(url)) return url;
+    rejected.push(url);
   }
-  throw new Error("All image hosts rejected the upload");
+  throw new Error(
+    rejected.length
+      ? `Image hosts returned non-image URLs (${rejected.join(", ")}). Set IMGBB_KEY for a reliable host.`
+      : "All image hosts rejected the upload. Set IMGBB_KEY for a reliable host."
+  );
 }
 
 export interface SupplierSearchResult {
@@ -421,10 +443,20 @@ export async function searchSuppliersByImage(
     };
   }
 
+  // Why each source failed. Every tier used to swallow its error, so a hosting
+  // failure, an exhausted quota and a genuine no-match all surfaced as the same
+  // "No matching suppliers found" — impossible to act on.
+  const reasons: string[] = [];
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
   // PRIMARY: RapidAPI alibaba-datahub image search — WHOLESALE Alibaba prices.
   if (RAPIDAPI_KEY) {
     try {
       const imageUrl = await hostImage(bytes, mime);
+      // The upstream search fetches this URL itself, so when it complains the
+      // image is unreachable or the wrong format, the URL we handed it is the
+      // first thing to check. Server-side only.
+      console.info("[image-search] hosted image:", imageUrl);
       const suppliers = await searchViaDatahub(imageUrl);
       if (suppliers.length > 0) {
         await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
@@ -435,9 +467,12 @@ export async function searchSuppliersByImage(
           note: "Wholesale Alibaba prices (RapidAPI DataHub). MOQ applies — check the links.",
         };
       }
-    } catch {
-      // No match / quota / network → try TMAPI, then Lens. Never go silent.
+      reasons.push("DataHub: no visual match");
+    } catch (e) {
+      reasons.push(`DataHub: ${why(e)}`);
     }
+  } else {
+    reasons.push("DataHub: RAPIDAPI_KEY not set");
   }
 
   // SECONDARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
@@ -454,11 +489,14 @@ export async function searchSuppliersByImage(
           note: "Wholesale / FOB prices from 1688 (Alibaba). MOQ applies — check the links.",
         };
       }
-      // No 1688 matches → fall through to Lens (retail) below.
-    } catch {
-      // TMAPI failed/quota → fall through to Lens, then mock. Never go silent.
+      reasons.push("TMAPI: no 1688 match");
+    } catch (e) {
+      reasons.push(`TMAPI: ${why(e)}`);
     }
+  } else {
+    reasons.push("TMAPI: token not set");
   }
+  if (!SERPAPI_KEY) reasons.push("Lens: SERPAPI_KEY not set");
 
   // SECONDARY: SerpAPI Google Lens — RETAIL prices (no wholesale source / fallback).
   if (SERPAPI_KEY) {
@@ -529,7 +567,15 @@ export async function searchSuppliersByImage(
     const r = await fetch(`${VENDEX}/api/v1/suppliers?job_id=${jobId}`, { headers: authHeaders(), signal: AbortSignal.timeout(15_000) });
     const data = await r.json();
     const raw: Record<string, unknown>[] = Array.isArray(data) ? data : data.suppliers ?? [];
-    if (raw.length === 0) return { ok: false, mock: false, suppliers: [], error: "No matching suppliers found for that image." };
+    if (raw.length === 0) {
+      reasons.push("Vendex: no suppliers");
+      return {
+        ok: false,
+        mock: false,
+        suppliers: [],
+        error: `No matching suppliers found for that image. Tried — ${reasons.join(" · ")}`,
+      };
+    }
 
     const suppliers = raw.slice(0, 20).map(toCandidate);
     await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
@@ -544,11 +590,12 @@ export async function searchSuppliersByImage(
     // Vendex unreachable / network error → graceful mock fallback so the bot
     // still responds (and is testable) rather than going silent.
     const msg = e instanceof Error ? e.message : "search failed";
+    reasons.push(`Vendex: ${msg}`);
     return {
       ok: true,
       mock: true,
       suppliers: mockSuppliers(),
-      note: `Image search backend offline (${msg}) — showing sample data.`,
+      note: `SAMPLE DATA — not real suppliers. Every source failed: ${reasons.join(" · ")}`,
     };
   }
 }
