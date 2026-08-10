@@ -58,6 +58,24 @@ function lc(s: string | undefined): string {
   return (s ?? "").toLowerCase();
 }
 
+// Marketplace listings carry full SEO titles ("Lazer Reusable Noise Cancelling 4
+// Ear Plugs with Storage Case, Soft Silicone, Pack of 3 | Reusable"). The Item
+// name field wants the product, not the listing — so keep the head clause and
+// drop the sales copy. It stays editable, this only sets a sane starting value.
+// The separator split does the real work; maxLen is only a backstop for titles
+// that run on without punctuation.
+export function shortTitle(raw: string | undefined, maxLen = 70): string {
+  // Everything after the first separator is qualifiers, not the product name.
+  let s = (raw ?? "").split(/[|,({\[–—]|\s[-•]\s/)[0];
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length <= maxLen) return s;
+  // Too long even so — prefer a word boundary, unless it sits so early that
+  // cutting there would discard most of the name.
+  const cut = s.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > maxLen / 2 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
 // Guess an HSN code from the product name/description.
 export function guessHsn(text: string): { hsn: string; estimated: boolean } {
   const t = lc(text);
@@ -161,7 +179,7 @@ export function enrichScraped(p: ScrapedProduct): EnrichedResult {
 
   return {
     inputs: {
-      itemName: p.productName ?? "",
+      itemName: shortTitle(p.productName),
       colour,
       hsnCode: hsn.hsn,
       size: dim,

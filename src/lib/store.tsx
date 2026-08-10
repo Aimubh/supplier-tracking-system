@@ -420,6 +420,26 @@ function uid(prefix = "id") {
   return `${prefix}-${Date.now().toString(36)}-${seq}`;
 }
 
+// A product added without a name gets a numbered placeholder rather than a blank
+// or a shared "Untitled" — several unnamed products otherwise render identically
+// and adding one looks like nothing happened.
+const UNTITLED = /^Untitled (\d+)$/;
+
+export function nextUntitledName(products: { name: string }[]): string {
+  const highest = products.reduce((max, p) => {
+    const n = Number(UNTITLED.exec(p.name.trim())?.[1]);
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 0);
+  return `Untitled ${highest + 1}`;
+}
+
+// True for a name the user hasn't chosen — blank, or a generated placeholder.
+// Such a name is replaced by the SKU "Item name" the first time Pre-Order saves.
+export function isPlaceholderName(name: string): boolean {
+  const s = name.trim();
+  return s === "" || UNTITLED.test(s);
+}
+
 export function blankProduct(name: string): Product {
   return {
     id: uid("p"),
@@ -910,12 +930,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The name is optional — an unnamed product gets a numbered placeholder so it's
+  // distinguishable in the list, and adopts the Pre-Order "Item name" on save.
   const addProduct = useCallback((name: string) => {
-    const p = blankProduct(name || "Untitled product");
+    const p = blankProduct(name.trim() || nextUntitledName(products));
     setProducts((prev) => [...prev, p]);
     setActiveIdState(p.id);
     void createProduct(p);
-  }, [createProduct]);
+  }, [products, createProduct]);
 
   // Persist a pre-built product (QR Generator path). Caller has already shaped it
   // (sample approved, pre-order skipped, etc.). Makes it the active product.

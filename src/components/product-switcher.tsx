@@ -15,13 +15,14 @@ export function ProductSwitcher() {
 
   const inProcess = products.filter((p) => !p.filed);
 
+  // A name is optional — Add always creates the product so you can start filling
+  // the pipeline immediately. Unnamed ones take their name from the Pre-Order
+  // "Item name" when that's saved.
   function commit() {
-    if (name.trim()) {
-      addProduct(name.trim());
-      setName("");
-      setAdding(false);
-      setOpen(false);
-    }
+    addProduct(name.trim());
+    setName("");
+    setAdding(false);
+    setOpen(false);
   }
 
   function finishAndFile() {
@@ -48,7 +49,7 @@ export function ProductSwitcher() {
           <span className="min-w-0 flex-1">
             <span className="eyebrow block">Active product</span>
             <span className="block truncate text-[13px] font-semibold text-ink">
-              {active ? active.name : "None selected"}
+              {active ? active.name || "Untitled product" : "None selected"}
             </span>
           </span>
           <ChevronDown className="h-4 w-4 text-muted" />
@@ -87,9 +88,8 @@ export function ProductSwitcher() {
               />
               <button
                 onClick={commit}
-                disabled={!name.trim()}
-                title={name.trim() ? "Add product" : "Type a product name first"}
-                className="rounded-lg bg-ink px-3 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Add product (a name is optional)"
+                className="rounded-lg bg-ink px-3 text-[12px] font-semibold text-white"
               >
                 Add
               </button>
@@ -119,7 +119,7 @@ export function ProductSwitcher() {
                     className="min-w-0 flex-1 text-left"
                   >
                     <span className="block truncate text-[13px] font-medium text-ink">
-                      {p.name}
+                      {p.name || "Untitled product"}
                     </span>
                     <span className="eyebrow">{p.category || "uncategorised"}</span>
                   </button>

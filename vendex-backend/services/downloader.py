@@ -16,26 +16,48 @@ INSTAGRAM_COOKIES_FILE = os.getenv("INSTAGRAM_COOKIES_FILE", "./instagram_cookie
 COOKIES_FROM_BROWSER = os.getenv("COOKIES_FROM_BROWSER", "chrome")
 
 # ── Locate FFmpeg ─────────────────────────────────────────────────────────────
-# 1. Prefer FFMPEG_LOCATION env var (set by start-windows.bat)
+# Resolved on FIRST USE, not at import. Only video/reel downloads need FFmpeg,
+# but this module is imported by routers/process.py, so raising here took the
+# whole service down — including the Alibaba/URL sourcing paths that never touch
+# a video. Now a missing FFmpeg fails just the download that needs it.
+#
+# 1. Prefer the FFMPEG_LOCATION env var (set by start-windows.bat)
 # 2. Fall back to shutil.which (PATH search)
 FFMPEG_LOCATION = os.getenv("FFMPEG_LOCATION", "").strip()
+_ffmpeg_path: str | None = None
 
-if FFMPEG_LOCATION and os.path.isdir(FFMPEG_LOCATION):
-    ffmpeg_path = os.path.join(FFMPEG_LOCATION, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    if not os.path.isfile(ffmpeg_path):
-        raise RuntimeError(f"FFmpeg not found at {ffmpeg_path}")
-else:
-    ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        raise RuntimeError("FFmpeg not found in PATH")
-    FFMPEG_LOCATION = os.path.dirname(ffmpeg_path)
 
-# Resolve to absolute path and ensure ffmpeg dir is on PATH for subprocess calls
-ffmpeg_path = os.path.abspath(ffmpeg_path)
-FFMPEG_LOCATION = os.path.abspath(FFMPEG_LOCATION)
-os.environ["PATH"] = FFMPEG_LOCATION + os.pathsep + os.environ.get("PATH", "")
+def get_ffmpeg_path() -> str:
+    """Absolute path to ffmpeg. Raises DownloadError if it isn't installed."""
+    global _ffmpeg_path, FFMPEG_LOCATION
+    if _ffmpeg_path:
+        return _ffmpeg_path
 
-logger.info(f"Using FFmpeg from: {ffmpeg_path}")
+    location = FFMPEG_LOCATION
+    if location and os.path.isdir(location):
+        path = os.path.join(location, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if not os.path.isfile(path):
+            raise DownloadError(
+                f"FFmpeg not found at {path}. Video links need FFmpeg — install it "
+                "or correct FFMPEG_LOCATION in vendex-backend/.env."
+            )
+    else:
+        found = shutil.which("ffmpeg")
+        if not found:
+            raise DownloadError(
+                "FFmpeg is not installed. Video/reel links need it; product URLs "
+                "do not. Install it (winget install Gyan.FFmpeg) or set "
+                "FFMPEG_LOCATION in vendex-backend/.env."
+            )
+        path = found
+        location = os.path.dirname(found)
+
+    # Absolute paths, and put the ffmpeg dir on PATH for subprocess calls.
+    _ffmpeg_path = os.path.abspath(path)
+    FFMPEG_LOCATION = os.path.abspath(location)
+    os.environ["PATH"] = FFMPEG_LOCATION + os.pathsep + os.environ.get("PATH", "")
+    logger.info(f"Using FFmpeg from: {_ffmpeg_path}")
+    return _ffmpeg_path
 
 
 def detect_platform(url: str) -> Platform:
@@ -65,7 +87,7 @@ def _download_sync(url: str, job_id: str) -> Dict[str, Any]:
         'verbose': True,
         'nocheckcertificate': True,
         'concurrent_fragment_downloads': 5,
-        'ffmpeg_location': ffmpeg_path,
+        'ffmpeg_location': get_ffmpeg_path(),
         'progress_hooks': [lambda d: logger.info(d)],
     }
 

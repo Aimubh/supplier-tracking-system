@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { Search, Sparkles, AlertTriangle, Loader2, ExternalLink, Link as LinkIcon, Image as ImageIcon } from "lucide-react";
-import { useStore, type Sourcing } from "@/lib/store";
+import { useStore, isPlaceholderName, type Sourcing } from "@/lib/store";
 import {
   computeSourcing,
   type ChannelResult,
@@ -649,6 +649,11 @@ export function SourcingPanel() {
         saved={saved}
         onSave={() => {
           patch("sourcing", draft);
+          // Products added straight from "+ New" carry a placeholder name, and
+          // nothing else in the app can rename one. The SKU identity is that
+          // name, so adopt it the first time it's saved.
+          const itemName = draft.inputs.itemName.trim();
+          if (isPlaceholderName(active.name) && itemName) patch("name", itemName);
           flashSaved();
         }}
         onDiscard={discard}
