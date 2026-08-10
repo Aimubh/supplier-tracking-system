@@ -756,6 +756,10 @@ function normalizeDocImages(
 
 interface StoreShape {
   products: Product[];
+  // True when the initial load failed. An empty `products` then means "couldn't
+  // reach the server", not "you have none" — the UI must not invite the user to
+  // recreate data that already exists.
+  loadFailed: boolean;
   activeId: string | null;
   active: Product | null;
   setActiveId: (id: string) => void;
@@ -829,6 +833,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveIdState] = useState<string | null>(null);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [, setHydrated] = useState(false);
+  // True when the initial load failed (offline / DB unreachable), so the UI can
+  // distinguish "couldn't load" from "you have no products".
+  const [loadFailed, setLoadFailed] = useState(false);
   const saveProductDebounced = useDebouncedSaver();
   const saveManufacturerDebounced = useDebouncedSaver();
 
@@ -848,7 +855,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setProducts(migrated);
         setActiveIdState(migrated[0]?.id ?? null);
         setManufacturers(mfrs);
+        setLoadFailed(false);
       } catch {
+        // An empty list after a failed load is indistinguishable from genuinely
+        // having no products — the UI invites you to "click New to start one",
+        // which risks recreating products that already exist. Say so instead.
+        if (!cancelled) setLoadFailed(true);
         /* leave empty on failure */
       } finally {
         if (!cancelled) setHydrated(true);
@@ -1081,6 +1093,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value: StoreShape = {
     products,
+    loadFailed,
     activeId,
     active,
     setActiveId,
