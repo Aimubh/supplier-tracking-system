@@ -78,11 +78,36 @@ export async function POST(req: Request) {
       if (hint) keywords = hint.keywords;
     }
   }
+  // Without an OpenRouter key there's no vision step at all, so fall back to the
+  // Item name the user already typed. Search engines choke on a full listing
+  // title, so keep it to the leading words.
+  if (keywords.length === 0 && label.trim()) {
+    keywords = label.trim().split(/\s+/).slice(0, 6);
+  }
 
   // 3) Search suppliers by image (cache-first, then hosts + live search).
   const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg", keywords);
 
   if (!result.ok || result.suppliers.length === 0) {
+    // No suppliers — but if the vision model recognised the product, its identity
+    // fields (name/colour/size/HSN) are still worth having. Fill what we know and
+    // say plainly that the pricing half is missing, rather than returning nothing.
+    if (vision) {
+      return NextResponse.json({
+        supplierCount: 0,
+        lowConfidence: true,
+        note: `Identified by AI: ${vision.itemName || "product"} · No suppliers found, so price, MOQ and FOB are NOT filled — enter them manually.`,
+        inputs: {
+          itemName: vision.itemName,
+          colour: vision.colour,
+          size: vision.dimension,
+          hsnCode: vision.hsn,
+        },
+        flags: { hsnEstimated: true, weightEstimated: true, colourParsed: !!vision.colour },
+        raw: { supplierName: "", country: "", productUrl: "", productImageUrl: "" },
+        suppliers: [],
+      });
+    }
     return NextResponse.json(
       { error: result.error ?? "No matching suppliers found for that image." },
       { status: result.error?.includes("No match") ? 404 : 502 }
@@ -159,6 +184,7 @@ function toScraped(c: RankCandidate): ScrapedProduct {
     country: c.country,
     productImageUrl: c.image,
     platform: c.platform,
+    moq: c.moq,
   };
 }
 

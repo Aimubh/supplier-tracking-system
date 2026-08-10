@@ -30,6 +30,9 @@ export interface RankCandidate {
   // the candidate's position in the input list is used as the image signal (the
   // search already orders by match), so this stays optional and back-compatible.
   imageScore?: number;
+  // Minimum order quantity when the source reports it (Alibaba keyword search
+  // returns per-tier quantities). Fills Order qty in the sourcing form.
+  moq?: number;
 }
 
 export type RankDimension = "price" | "top" | "review";

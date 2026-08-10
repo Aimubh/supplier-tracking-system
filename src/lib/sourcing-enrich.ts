@@ -62,6 +62,13 @@ function lc(s: string | undefined): string {
 // Ear Plugs with Storage Case, Soft Silicone, Pack of 3 | Reusable"). The Item
 // name field wants the product, not the listing — so keep the head clause and
 // drop the sales copy. It stays editable, this only sets a sane starting value.
+// Round a scraped price to 4 dp. The upstream API serialises 32-bit floats, so
+// prices arrive as 0.10000000149011612 rather than 0.1. Non-finite input → 0.
+export function roundMoney(n: number | undefined): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) return 0;
+  return Math.round(n * 10000) / 10000;
+}
+
 // The separator split does the real work; maxLen is only a backstop for titles
 // that run on without punctuation.
 export function shortTitle(raw: string | undefined, maxLen = 70): string {
@@ -174,8 +181,12 @@ export function enrichScraped(p: ScrapedProduct): EnrichedResult {
   const material = propLookup(props, ["material"]);
   const hsn = guessHsn(`${text} ${material}`);
 
-  // Prefer the lowest tier price as the FOB the model costs from.
-  const fob = p.priceRangeMin && p.priceRangeMin > 0 ? p.priceRangeMin : p.unitPriceUSD ?? 0;
+  // Prefer the lowest tier price as the FOB the model costs from. The API returns
+  // 32-bit floats, so $0.10 arrives as 0.10000000149011612 — round it, or that
+  // noise lands in a money field and flows through the whole landed-cost sheet.
+  // 4 dp, because sub-cent FOBs are normal at these volumes ($0.0125/piece).
+  const rawFob = p.priceRangeMin && p.priceRangeMin > 0 ? p.priceRangeMin : p.unitPriceUSD ?? 0;
+  const fob = roundMoney(rawFob);
 
   return {
     inputs: {

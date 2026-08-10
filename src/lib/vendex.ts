@@ -23,6 +23,11 @@ const SERPAPI_KEY = process.env.SERPAPI_KEY ?? "";
 // TMAPI — 1688/Alibaba image search (WHOLESALE / FOB prices). The bot's primary
 // source when set; Lens is the retail fallback.
 const TMAPI_TOKEN = process.env.TMAPI_TOKEN ?? "";
+// RapidAPI alibaba-datahub — wholesale Alibaba image search, shares the key the
+// Vendex backend already uses. Tried before TMAPI so a working key beats an
+// unfunded one, and both beat the retail Lens fallback.
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY ?? "";
+const DATAHUB_HOST = "alibaba-datahub.p.rapidapi.com";
 const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.io";
 // USD-per-unit conversion so prices in different currencies rank comparably.
 // CNY matters most here (1688 quotes in ¥).
@@ -137,16 +142,38 @@ async function uploadCatbox(bytes: Uint8Array, mime: string, ext: string): Promi
   } catch { return null; }
 }
 
+// A host can "succeed" and still hand back a URL that serves an HTML page —
+// tmpfiles.org's /dl/ link now 302s to its viewer page and returns text/html.
+// The search APIs fetch this URL themselves and reject it as an invalid image,
+// which surfaced as an unexplained "no matching suppliers". So confirm the URL
+// really serves an image before trusting it, and move to the next host if not.
+async function servesAnImage(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return false;
+    return (res.headers.get("content-type") ?? "").toLowerCase().startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
 export async function hostImage(bytes: Uint8Array, mime: string): Promise<string> {
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
   // PRIMARY: ImgBB (reliable, keyed). Then free hosts as best-effort fallback.
   const imgbb = await uploadImgbb(bytes);
   if (imgbb) return imgbb;
+  const rejected: string[] = [];
   for (const upload of [uploadLitterbox, uploadTmpfiles, uploadCatbox]) {
     const url = await upload(bytes, mime, ext);
-    if (url) return url;
+    if (!url) continue;
+    if (await servesAnImage(url)) return url;
+    rejected.push(url);
   }
-  throw new Error("All image hosts rejected the upload");
+  throw new Error(
+    rejected.length
+      ? `Image hosts returned non-image URLs (${rejected.join(", ")}). Set IMGBB_KEY for a reliable host.`
+      : "All image hosts rejected the upload. Set IMGBB_KEY for a reliable host."
+  );
 }
 
 export interface SupplierSearchResult {
@@ -304,6 +331,108 @@ function tmapiToCandidate(it: Record<string, unknown>, index: number, total: num
   };
 }
 
+// --- RapidAPI alibaba-datahub image search (WHOLESALE) -----------------------
+// Same account/key the Vendex backend uses for product lookups. Prices are
+// Alibaba wholesale, so this belongs ahead of Google Lens, which returns retail
+// shop listings (a photo of a bottle came back as hand wash and US retailers).
+function datahubToCandidate(it: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const info = ((it.productInfo ?? it) as Record<string, unknown>) ?? {};
+  const priceUsd = num(pick(info, ["price", "minPrice", "unitPrice", "priceStart"]));
+  const title = String(pick(info, ["subject", "title", "productTitle", "name"]) ?? "");
+  const shop = String(pick(info, ["companyName", "supplierName", "shopName", "sellerName"]) ?? "Alibaba supplier");
+  const url = String(pick(info, ["productUrl", "detailUrl", "itemUrl", "url"]) ?? "");
+  const img = String(pick(info, ["imageUrl", "mainImage", "image", "picUrl"]) ?? "");
+  // Result order is the visual-match order → 1 = best match.
+  const pos = index + 1;
+  return {
+    name: shop,
+    title,
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews: num(pick(info, ["saleCount", "sales", "orders", "tradeCount"])),
+    rating: num(pick(info, ["rating", "score", "starLevel"])),
+    country: "CN",
+    url,
+    image: img,
+    platform: "alibaba",
+    imageScore: total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1,
+  };
+}
+
+// Keyword search on the same key. DataHub's IMAGE matching is unreliable — even a
+// photo taken straight from an Alibaba listing returns zero — but its keyword
+// search works well, so it's the fallback when a photo doesn't match.
+// Shape: result.resultList[].{item,seller,company}, price in
+// item.sku.def.priceModule ("0.8-0.84" = a range across MOQ tiers).
+function datahubKeywordToCandidate(row: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const item = (row.item ?? {}) as Record<string, unknown>;
+  const company = (row.company ?? {}) as Record<string, unknown>;
+  const seller = (row.seller ?? {}) as Record<string, unknown>;
+  const priceModule =
+    ((((item.sku as Record<string, unknown>)?.def as Record<string, unknown>)?.priceModule ??
+      {}) as Record<string, unknown>);
+  // "0.8-0.84" → 0.8. The low end is the bulk-tier price, which is the FOB to
+  // cost against; a single value parses the same way.
+  const priceUsd = num(String(pick(priceModule, ["price", "priceFormatted"]) ?? "").split("-")[0]);
+  const tiers = (priceModule.priceList ?? []) as Record<string, unknown>[];
+  const moq = Array.isArray(tiers) && tiers.length ? num(tiers[0].minQuantity) : null;
+  const absolute = (u: string) => (u.startsWith("//") ? `https:${u}` : u);
+  const pos = index + 1;
+  return {
+    name: String(pick(company, ["companyName", "name"]) ?? pick(seller, ["name", "loginId"]) ?? "Alibaba supplier"),
+    title: String(pick(item, ["title", "subject"]) ?? ""),
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews: num(pick(seller, ["saleCount", "orders", "tradeCount"])),
+    rating: num(pick(seller, ["rating", "score", "starLevel"])),
+    country: "CN",
+    url: absolute(String(pick(item, ["itemUrl", "productUrl"]) ?? "")),
+    image: absolute(String(pick(item, ["image", "mainImage"]) ?? "")),
+    platform: "alibaba",
+    imageScore: total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1,
+    moq: moq ?? undefined,
+  };
+}
+
+async function searchViaDatahubKeyword(query: string): Promise<RankCandidate[]> {
+  const url = `https://${DATAHUB_HOST}/item_search?q=${encodeURIComponent(query)}&page=1`;
+  const res = await fetch(url, {
+    headers: { "x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": DATAHUB_HOST },
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!res.ok) throw new Error(`DataHub keyword HTTP ${res.status}`);
+  const data = await res.json();
+  const listRaw = ((data?.result ?? {}) as Record<string, unknown>).resultList ?? [];
+  const list: Record<string, unknown>[] = Array.isArray(listRaw) ? listRaw : [];
+  if (list.length === 0) throw new Error("DataHub keyword search returned no items");
+  const usable = list.slice(0, 20);
+  return usable.map((r, i) => datahubKeywordToCandidate(r, i, usable.length));
+}
+
+async function searchViaDatahub(imageUrl: string): Promise<RankCandidate[]> {
+  const url =
+    `https://${DATAHUB_HOST}/item_search_image` +
+    `?imgUrl=${encodeURIComponent(imageUrl)}&page=1`;
+  const res = await fetch(url, {
+    headers: { "x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": DATAHUB_HOST },
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!res.ok) throw new Error(`DataHub HTTP ${res.status}`);
+  const data = await res.json();
+  const result = (data?.result ?? {}) as Record<string, unknown>;
+  // Quota errors arrive as HTTP 200 with a message body — surface, don't cache.
+  const msg = String((data as Record<string, unknown>)?.message ?? "");
+  if (/exceed|quota/i.test(msg)) throw new Error(`DataHub quota: ${msg}`);
+  const listRaw = pick(result, ["resultList", "items", "list"]) ?? [];
+  const list: Record<string, unknown>[] = Array.isArray(listRaw) ? listRaw : [];
+  if (list.length === 0) {
+    const status = (result.status ?? {}) as Record<string, unknown>;
+    throw new Error(`DataHub returned no items (${JSON.stringify(status.msg ?? status.code ?? "empty")})`);
+  }
+  const usable = list.slice(0, 20);
+  return usable.map((it, i) => datahubToCandidate(it, i, usable.length));
+}
+
 // TMAPI requires the image be on an Alibaba-affiliated host, so first convert our
 // public image URL into an Alibaba-hosted one, then run the image search.
 async function searchViaTmapi(imageUrl: string): Promise<RankCandidate[]> {
@@ -364,7 +493,39 @@ export async function searchSuppliersByImage(
     };
   }
 
-  // PRIMARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
+  // Why each source failed. Every tier used to swallow its error, so a hosting
+  // failure, an exhausted quota and a genuine no-match all surfaced as the same
+  // "No matching suppliers found" — impossible to act on.
+  const reasons: string[] = [];
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  // PRIMARY: RapidAPI alibaba-datahub image search — WHOLESALE Alibaba prices.
+  if (RAPIDAPI_KEY) {
+    try {
+      const imageUrl = await hostImage(bytes, mime);
+      // The upstream search fetches this URL itself, so when it complains the
+      // image is unreachable or the wrong format, the URL we handed it is the
+      // first thing to check. Server-side only.
+      console.info("[image-search] hosted image:", imageUrl);
+      const suppliers = await searchViaDatahub(imageUrl);
+      if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: "Wholesale Alibaba prices (RapidAPI DataHub). MOQ applies — check the links.",
+        };
+      }
+      reasons.push("DataHub: no visual match");
+    } catch (e) {
+      reasons.push(`DataHub: ${why(e)}`);
+    }
+  } else {
+    reasons.push("DataHub: RAPIDAPI_KEY not set");
+  }
+
+  // SECONDARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
   if (TMAPI_TOKEN) {
     try {
       const imageUrl = await hostImage(bytes, mime);
@@ -378,11 +539,38 @@ export async function searchSuppliersByImage(
           note: "Wholesale / FOB prices from 1688 (Alibaba). MOQ applies — check the links.",
         };
       }
-      // No 1688 matches → fall through to Lens (retail) below.
-    } catch {
-      // TMAPI failed/quota → fall through to Lens, then mock. Never go silent.
+      reasons.push("TMAPI: no 1688 match");
+    } catch (e) {
+      reasons.push(`TMAPI: ${why(e)}`);
     }
+  } else {
+    reasons.push("TMAPI: token not set");
   }
+  // FALLBACK: keyword search on Alibaba. Image matching misses often — even a
+  // photo lifted straight from an Alibaba listing returns nothing — but the same
+  // key's keyword search works, and it's still WHOLESALE, so it belongs ahead of
+  // the retail Lens fallback.
+  const query = keywords.join(" ").trim();
+  if (RAPIDAPI_KEY && query) {
+    try {
+      const suppliers = await searchViaDatahubKeyword(query);
+      if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords });
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: `No visual match, so these are keyword results for “${query}” — wholesale Alibaba. Confirm each listing is actually your product before costing.`,
+        };
+      }
+    } catch (e) {
+      reasons.push(`DataHub keyword: ${why(e)}`);
+    }
+  } else if (RAPIDAPI_KEY) {
+    reasons.push("DataHub keyword: no search terms (fill in Item name first)");
+  }
+
+  if (!SERPAPI_KEY) reasons.push("Lens: SERPAPI_KEY not set");
 
   // SECONDARY: SerpAPI Google Lens — RETAIL prices (no wholesale source / fallback).
   if (SERPAPI_KEY) {
@@ -453,7 +641,15 @@ export async function searchSuppliersByImage(
     const r = await fetch(`${VENDEX}/api/v1/suppliers?job_id=${jobId}`, { headers: authHeaders(), signal: AbortSignal.timeout(15_000) });
     const data = await r.json();
     const raw: Record<string, unknown>[] = Array.isArray(data) ? data : data.suppliers ?? [];
-    if (raw.length === 0) return { ok: false, mock: false, suppliers: [], error: "No matching suppliers found for that image." };
+    if (raw.length === 0) {
+      reasons.push("Vendex: no suppliers");
+      return {
+        ok: false,
+        mock: false,
+        suppliers: [],
+        error: `No matching suppliers found for that image. Tried — ${reasons.join(" · ")}`,
+      };
+    }
 
     const suppliers = raw.slice(0, 20).map(toCandidate);
     await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
@@ -468,11 +664,12 @@ export async function searchSuppliersByImage(
     // Vendex unreachable / network error → graceful mock fallback so the bot
     // still responds (and is testable) rather than going silent.
     const msg = e instanceof Error ? e.message : "search failed";
+    reasons.push(`Vendex: ${msg}`);
     return {
       ok: true,
       mock: true,
       suppliers: mockSuppliers(),
-      note: `Image search backend offline (${msg}) — showing sample data.`,
+      note: `SAMPLE DATA — not real suppliers. Every source failed: ${reasons.join(" · ")}`,
     };
   }
 }
