@@ -4,7 +4,24 @@
 //   node src/lib/sourcing-enrich.test.ts
 
 import assert from "node:assert/strict";
-import { shortTitle } from "./sourcing-enrich.ts";
+import { shortTitle, roundMoney } from "./sourcing-enrich.ts";
+
+// roundMoney: the API sends 32-bit floats, so $0.10 arrives as 0.10000000149…
+assert.equal(roundMoney(0.10000000149011612), 0.1);
+assert.equal(roundMoney(2.4500000476837158), 2.45);
+
+// Sub-cent FOBs are real at these volumes and must survive rounding.
+assert.equal(roundMoney(0.0125), 0.0125);
+assert.equal(roundMoney(0.00012), 0.0001);
+
+// Exact values pass through untouched.
+assert.equal(roundMoney(0), 0);
+assert.equal(roundMoney(19), 19);
+
+// Junk must not become NaN in a money field.
+assert.equal(roundMoney(undefined), 0);
+assert.equal(roundMoney(NaN), 0);
+assert.equal(roundMoney(Infinity), 0);
 
 // The real titles that prompted this — full Amazon SEO listings.
 assert.equal(
