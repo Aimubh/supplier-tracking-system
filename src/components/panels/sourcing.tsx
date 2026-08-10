@@ -101,6 +101,28 @@ export function SourcingPanel() {
 
   // ---- Auto-fill from an uploaded product image ----
   async function autoFillFromImage(raw: File) {
+    // Visual matching misses often, and the keyword fallback needs words. Ask
+    // for them up front rather than spending the search and then reporting
+    // "no search terms — fill in Item name first" after the fact.
+    let label = i.itemName.trim();
+    if (!label) {
+      label = (
+        window.prompt(
+          "What is this product? (e.g. “silicone travel bottle”)\n\n" +
+            "Used to search Alibaba by name if the photo doesn't match visually.",
+          ""
+        ) ?? ""
+      ).trim();
+      if (!label) {
+        setFetchMsg({
+          tone: "err",
+          text: "Add a product name first — it's needed if the photo doesn't match visually.",
+        });
+        return;
+      }
+      setInput("itemName", label);
+    }
+
     setFetching(true);
     setFetchMsg({ tone: "ok", text: `Searching Alibaba by image “${raw.name}”…` });
     try {
@@ -109,7 +131,7 @@ export function SourcingPanel() {
       const file = await toJpegIfHeic(raw);
       const form = new FormData();
       form.append("file", file);
-      form.append("label", i.itemName || "");
+      form.append("label", label);
       const res = await fetch("/api/sourcing/fetch-image", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) {
