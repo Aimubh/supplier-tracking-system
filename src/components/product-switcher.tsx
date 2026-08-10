@@ -8,7 +8,8 @@ import { useStore } from "@/lib/store";
 // attaches to this active product, so one product flows through the whole pipeline.
 // Filed products live on the dashboard and are hidden from this in-process list.
 export function ProductSwitcher() {
-  const { products, active, setActiveId, addProduct, removeProduct, fileProduct } = useStore();
+  const { products, active, setActiveId, addProduct, removeProduct, fileProduct, loadFailed } =
+    useStore();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -96,7 +97,15 @@ export function ProductSwitcher() {
             </div>
           )}
 
-          {inProcess.length === 0 && !adding && (
+          {inProcess.length === 0 && !adding && loadFailed && (
+            <p className="px-3 py-4 text-center text-[12px] text-block">
+              Couldn&apos;t load your products — the server or database was unreachable.
+              Your data is still there. Check your connection and refresh, and
+              <span className="text-ink"> don&apos;t re-create them</span> in the meantime.
+            </p>
+          )}
+
+          {inProcess.length === 0 && !adding && !loadFailed && (
             <p className="px-3 py-4 text-center text-[12px] text-muted">
               No products in process. Click <span className="text-ink">New</span> to start one
               {products.length > 0 ? " — filed products are on the dashboard." : "."}
