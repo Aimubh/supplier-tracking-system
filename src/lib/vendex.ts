@@ -23,6 +23,11 @@ const SERPAPI_KEY = process.env.SERPAPI_KEY ?? "";
 // TMAPI — 1688/Alibaba image search (WHOLESALE / FOB prices). The bot's primary
 // source when set; Lens is the retail fallback.
 const TMAPI_TOKEN = process.env.TMAPI_TOKEN ?? "";
+// RapidAPI alibaba-datahub — wholesale Alibaba image search, shares the key the
+// Vendex backend already uses. Tried before TMAPI so a working key beats an
+// unfunded one, and both beat the retail Lens fallback.
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY ?? "";
+const DATAHUB_HOST = "alibaba-datahub.p.rapidapi.com";
 const TMAPI_BASE = process.env.TMAPI_BASE_URL ?? "https://api.tmapi.io";
 // USD-per-unit conversion so prices in different currencies rank comparably.
 // CNY matters most here (1688 quotes in ¥).
@@ -304,6 +309,58 @@ function tmapiToCandidate(it: Record<string, unknown>, index: number, total: num
   };
 }
 
+// --- RapidAPI alibaba-datahub image search (WHOLESALE) -----------------------
+// Same account/key the Vendex backend uses for product lookups. Prices are
+// Alibaba wholesale, so this belongs ahead of Google Lens, which returns retail
+// shop listings (a photo of a bottle came back as hand wash and US retailers).
+function datahubToCandidate(it: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const info = ((it.productInfo ?? it) as Record<string, unknown>) ?? {};
+  const priceUsd = num(pick(info, ["price", "minPrice", "unitPrice", "priceStart"]));
+  const title = String(pick(info, ["subject", "title", "productTitle", "name"]) ?? "");
+  const shop = String(pick(info, ["companyName", "supplierName", "shopName", "sellerName"]) ?? "Alibaba supplier");
+  const url = String(pick(info, ["productUrl", "detailUrl", "itemUrl", "url"]) ?? "");
+  const img = String(pick(info, ["imageUrl", "mainImage", "image", "picUrl"]) ?? "");
+  // Result order is the visual-match order → 1 = best match.
+  const pos = index + 1;
+  return {
+    name: shop,
+    title,
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews: num(pick(info, ["saleCount", "sales", "orders", "tradeCount"])),
+    rating: num(pick(info, ["rating", "score", "starLevel"])),
+    country: "CN",
+    url,
+    image: img,
+    platform: "alibaba",
+    imageScore: total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1,
+  };
+}
+
+async function searchViaDatahub(imageUrl: string): Promise<RankCandidate[]> {
+  const url =
+    `https://${DATAHUB_HOST}/item_search_image` +
+    `?imgUrl=${encodeURIComponent(imageUrl)}&page=1`;
+  const res = await fetch(url, {
+    headers: { "x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": DATAHUB_HOST },
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!res.ok) throw new Error(`DataHub HTTP ${res.status}`);
+  const data = await res.json();
+  const result = (data?.result ?? {}) as Record<string, unknown>;
+  // Quota errors arrive as HTTP 200 with a message body — surface, don't cache.
+  const msg = String((data as Record<string, unknown>)?.message ?? "");
+  if (/exceed|quota/i.test(msg)) throw new Error(`DataHub quota: ${msg}`);
+  const listRaw = pick(result, ["resultList", "items", "list"]) ?? [];
+  const list: Record<string, unknown>[] = Array.isArray(listRaw) ? listRaw : [];
+  if (list.length === 0) {
+    const status = (result.status ?? {}) as Record<string, unknown>;
+    throw new Error(`DataHub returned no items (${JSON.stringify(status.msg ?? status.code ?? "empty")})`);
+  }
+  const usable = list.slice(0, 20);
+  return usable.map((it, i) => datahubToCandidate(it, i, usable.length));
+}
+
 // TMAPI requires the image be on an Alibaba-affiliated host, so first convert our
 // public image URL into an Alibaba-hosted one, then run the image search.
 async function searchViaTmapi(imageUrl: string): Promise<RankCandidate[]> {
@@ -364,7 +421,26 @@ export async function searchSuppliersByImage(
     };
   }
 
-  // PRIMARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
+  // PRIMARY: RapidAPI alibaba-datahub image search — WHOLESALE Alibaba prices.
+  if (RAPIDAPI_KEY) {
+    try {
+      const imageUrl = await hostImage(bytes, mime);
+      const suppliers = await searchViaDatahub(imageUrl);
+      if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords }); // TIER 1: collect
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: "Wholesale Alibaba prices (RapidAPI DataHub). MOQ applies — check the links.",
+        };
+      }
+    } catch {
+      // No match / quota / network → try TMAPI, then Lens. Never go silent.
+    }
+  }
+
+  // SECONDARY: TMAPI 1688/Alibaba image search — WHOLESALE / FOB prices.
   if (TMAPI_TOKEN) {
     try {
       const imageUrl = await hostImage(bytes, mime);
