@@ -359,6 +359,56 @@ function datahubToCandidate(it: Record<string, unknown>, index: number, total: n
   };
 }
 
+// Keyword search on the same key. DataHub's IMAGE matching is unreliable — even a
+// photo taken straight from an Alibaba listing returns zero — but its keyword
+// search works well, so it's the fallback when a photo doesn't match.
+// Shape: result.resultList[].{item,seller,company}, price in
+// item.sku.def.priceModule ("0.8-0.84" = a range across MOQ tiers).
+function datahubKeywordToCandidate(row: Record<string, unknown>, index: number, total: number): RankCandidate {
+  const item = (row.item ?? {}) as Record<string, unknown>;
+  const company = (row.company ?? {}) as Record<string, unknown>;
+  const seller = (row.seller ?? {}) as Record<string, unknown>;
+  const priceModule =
+    ((((item.sku as Record<string, unknown>)?.def as Record<string, unknown>)?.priceModule ??
+      {}) as Record<string, unknown>);
+  // "0.8-0.84" → 0.8. The low end is the bulk-tier price, which is the FOB to
+  // cost against; a single value parses the same way.
+  const priceUsd = num(String(pick(priceModule, ["price", "priceFormatted"]) ?? "").split("-")[0]);
+  const tiers = (priceModule.priceList ?? []) as Record<string, unknown>[];
+  const moq = Array.isArray(tiers) && tiers.length ? num(tiers[0].minQuantity) : null;
+  const absolute = (u: string) => (u.startsWith("//") ? `https:${u}` : u);
+  const pos = index + 1;
+  return {
+    name: String(pick(company, ["companyName", "name"]) ?? pick(seller, ["name", "loginId"]) ?? "Alibaba supplier"),
+    title: String(pick(item, ["title", "subject"]) ?? ""),
+    priceUsd,
+    priceInr: priceUsd != null ? Math.round(priceUsd / 0.012) : null,
+    reviews: num(pick(seller, ["saleCount", "orders", "tradeCount"])),
+    rating: num(pick(seller, ["rating", "score", "starLevel"])),
+    country: "CN",
+    url: absolute(String(pick(item, ["itemUrl", "productUrl"]) ?? "")),
+    image: absolute(String(pick(item, ["image", "mainImage"]) ?? "")),
+    platform: "alibaba",
+    imageScore: total > 1 ? Math.max(0, 1 - (pos - 1) / (total - 1)) : 1,
+    moq: moq ?? undefined,
+  };
+}
+
+async function searchViaDatahubKeyword(query: string): Promise<RankCandidate[]> {
+  const url = `https://${DATAHUB_HOST}/item_search?q=${encodeURIComponent(query)}&page=1`;
+  const res = await fetch(url, {
+    headers: { "x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": DATAHUB_HOST },
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!res.ok) throw new Error(`DataHub keyword HTTP ${res.status}`);
+  const data = await res.json();
+  const listRaw = ((data?.result ?? {}) as Record<string, unknown>).resultList ?? [];
+  const list: Record<string, unknown>[] = Array.isArray(listRaw) ? listRaw : [];
+  if (list.length === 0) throw new Error("DataHub keyword search returned no items");
+  const usable = list.slice(0, 20);
+  return usable.map((r, i) => datahubKeywordToCandidate(r, i, usable.length));
+}
+
 async function searchViaDatahub(imageUrl: string): Promise<RankCandidate[]> {
   const url =
     `https://${DATAHUB_HOST}/item_search_image` +
@@ -496,6 +546,30 @@ export async function searchSuppliersByImage(
   } else {
     reasons.push("TMAPI: token not set");
   }
+  // FALLBACK: keyword search on Alibaba. Image matching misses often — even a
+  // photo lifted straight from an Alibaba listing returns nothing — but the same
+  // key's keyword search works, and it's still WHOLESALE, so it belongs ahead of
+  // the retail Lens fallback.
+  const query = keywords.join(" ").trim();
+  if (RAPIDAPI_KEY && query) {
+    try {
+      const suppliers = await searchViaDatahubKeyword(query);
+      if (suppliers.length > 0) {
+        await saveToCache(suppliers, { imageHash, keywords });
+        return {
+          ok: true,
+          mock: false,
+          suppliers,
+          note: `No visual match, so these are keyword results for “${query}” — wholesale Alibaba. Confirm each listing is actually your product before costing.`,
+        };
+      }
+    } catch (e) {
+      reasons.push(`DataHub keyword: ${why(e)}`);
+    }
+  } else if (RAPIDAPI_KEY) {
+    reasons.push("DataHub keyword: no search terms (fill in Item name first)");
+  }
+
   if (!SERPAPI_KEY) reasons.push("Lens: SERPAPI_KEY not set");
 
   // SECONDARY: SerpAPI Google Lens — RETAIL prices (no wholesale source / fallback).

@@ -78,6 +78,12 @@ export async function POST(req: Request) {
       if (hint) keywords = hint.keywords;
     }
   }
+  // Without an OpenRouter key there's no vision step at all, so fall back to the
+  // Item name the user already typed. Search engines choke on a full listing
+  // title, so keep it to the leading words.
+  if (keywords.length === 0 && label.trim()) {
+    keywords = label.trim().split(/\s+/).slice(0, 6);
+  }
 
   // 3) Search suppliers by image (cache-first, then hosts + live search).
   const result = await searchSuppliersByImage(bytes, file.type || "image/jpeg", keywords);
@@ -178,6 +184,7 @@ function toScraped(c: RankCandidate): ScrapedProduct {
     country: c.country,
     productImageUrl: c.image,
     platform: c.platform,
+    moq: c.moq,
   };
 }
 
