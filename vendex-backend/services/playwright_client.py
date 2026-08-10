@@ -239,12 +239,21 @@ async def _extract_product_data(page, url: str, index: int, job_id: str, log_cb=
                 if(og?.content) imgs.push(og.content);
             }
 
-            // Price tiers — actual class is .module_price .price-item (confirmed from live DOM)
-            // Each price-item text: "200 - 999 packs\n₹203.76"
+            // Price tiers — actual class is .module_price .price-item.
+            // The two lines have SWAPPED order between Alibaba layouts:
+            //   older: "200 - 999 packs\n₹203.76"   (qty first)
+            //   current: "₹17.55\n100-999 pieces"   (price first)
+            // Assuming a fixed order read "100-999 pieces" as the price and
+            // produced $100 for a $0.10 item, so identify each part by content.
+            // A price carries a currency symbol (or a 2-dp decimal); a quantity
+            // line carries a unit word or a range.
             const tierEls = $$('.module_price .price-item, [data-testid="ladder-price"] .price-item');
+            const looksPrice = s => /[₹$€¥£]/.test(s) || /\d+[.,]\d{2}\b/.test(s);
             const tiers = tierEls.map(el => {
                 const parts = (el.innerText||'').trim().split(/[\r\n]+/).map(s=>s.trim()).filter(Boolean);
-                return {qty: parts[0]||'', price: parts[1]||'', raw: parts.join(' ')};
+                const price = parts.find(looksPrice) || '';
+                const qty = parts.find(s => s !== price) || '';
+                return {qty: qty, price: price, raw: parts.join(' ')};
             }).filter(t => t.price);
 
             // MOQ — from first price tier qty or dedicated element
