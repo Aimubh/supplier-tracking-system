@@ -667,11 +667,39 @@ _LAUNCH_ARGS = [
 ]
 
 
+# Attach to a Chrome you started yourself instead of launching a fresh one.
+# A headless browser is what Alibaba fingerprints and blocks; your own Chrome —
+# with its real profile, cookies and any logins — looks like what it is.
+#
+#   1. Close Chrome completely, then start it with:
+#        chrome.exe --remote-debugging-port=9222
+#   2. Set in vendex-backend/.env:
+#        PLAYWRIGHT_CDP_URL=http://127.0.0.1:9222
+#
+# PLAYWRIGHT_HEADLESS=0 is the middle option: still our own browser, but visible,
+# which alone defeats some headless checks.
+_CDP_URL = os.getenv("PLAYWRIGHT_CDP_URL", "").strip()
+_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "1").strip() != "0"
+
+
 async def _make_browser_context(p):
     """
     Launch Chromium and create a stealth context.
     Reuses a saved session file if it exists so Alibaba sees a returning user.
+
+    When PLAYWRIGHT_CDP_URL is set, attaches to that already-running Chrome and
+    reuses its DEFAULT context, so the scrape inherits the real profile.
     """
+    if _CDP_URL:
+        logger.info(f"Attaching to your Chrome over CDP at {_CDP_URL}")
+        browser = await p.chromium.connect_over_cdp(_CDP_URL)
+        # contexts[0] is the real profile. new_context() would be a blank
+        # incognito-style context — which defeats the point of attaching.
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        await _stealth.apply_stealth_async(context)
+        await context.add_cookies(_USD_COOKIES)
+        return browser, context
+
     # Use real system Chrome if available — Alibaba detects Playwright's bundled Chromium.
     _CHROME_PATHS = [
         # Windows
@@ -683,7 +711,7 @@ async def _make_browser_context(p):
     ]
     _chrome_exe = next((p for p in _CHROME_PATHS if os.path.exists(p)), None)
     browser = await p.chromium.launch(
-        headless=True,
+        headless=_HEADLESS,
         executable_path=_chrome_exe,
         args=_LAUNCH_ARGS,
     )
@@ -723,6 +751,21 @@ async def _make_browser_context(p):
     await context.add_cookies(_USD_COOKIES)
 
     return browser, context
+
+
+async def _close_browser(browser):
+    """Release the browser.
+
+    For a browser we launched, this closes it. For a CDP-attached browser this
+    disconnects instead — Playwright only tears down contexts it created itself,
+    and we deliberately reuse the user's existing context, so their Chrome and
+    its tabs survive. Never let a close error fail the scrape; the data is
+    already extracted by this point.
+    """
+    try:
+        await browser.close()
+    except Exception as e:
+        logger.warning(f"Browser close failed (ignored): {e}")
 
 
 async def _save_session(context):
@@ -1334,7 +1377,7 @@ async def search_alibaba_with_playwright(image_path: str, job_id: str, log_cb=No
         except Exception as e:
             logger.error(f"Playwright automation failed: {e}")
         finally:
-            await browser.close()
+            await _close_browser(browser)
 
     return results
 
@@ -1365,6 +1408,6 @@ async def scrape_product_url(product_url: str, job_id: str) -> list[SupplierResu
         except Exception as e:
             logger.error(f"Direct product scrape failed: {e}")
         finally:
-            await browser.close()
+            await _close_browser(browser)
 
     return results
