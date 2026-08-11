@@ -27,6 +27,23 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
   const sym = SYM[disp];
   const L = p.logistics;
   const e = p.expenses;
+  const wk = p.working;
+
+  // Third-party commission is disclosed on the bill but deliberately excluded
+  // from every total — computeOrderSummary never sees it. Printing it inside the
+  // Summary table would imply it had been costed.
+  const tp = wk.thirdPartyPayment && (wk.thirdPartyCompany.trim() || wk.thirdPartyCommissionPct > 0);
+  const thirdPartyHtml = tp
+    ? `
+    <h2>Third party</h2>
+    <div class="grid">
+      <div><span>Company</span><span>${esc(wk.thirdPartyCompany.trim() || "—")}</span></div>
+      <div><span>Commission</span><span>${
+        wk.thirdPartyCommissionPct > 0 ? esc(String(wk.thirdPartyCommissionPct)) + "%" : "—"
+      }</span></div>
+    </div>
+    <p class="muted">Disclosed for reference — not included in the totals above.</p>`
+    : "";
   // computeOrderSummary already expressed every aggregate in the product currency,
   // so the display conversion is a single product→display step.
   const cP = (n: number) => convert(n, prodCur, disp, r);
@@ -172,6 +189,7 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
       ${s.totalQty > 0 ? `<tr><td class="muted">Per unit</td><td class="num muted">${esc(money(dPerUnit))}</td></tr>` : ""}
       ${dueRow}
     </table>
+    ${thirdPartyHtml}
 
     <p class="foot">Generated from the Supplier Tracking System · ${esc(dateLabel)}. Figures in ${esc(disp)}. This is an internal order summary, not a tax invoice.</p>
   </div>

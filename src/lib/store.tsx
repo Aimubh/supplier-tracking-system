@@ -75,6 +75,13 @@ export interface Working {
   // Keys: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance".
   paymentCurrency?: Partial<Record<"rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance", CurrencyCode>>;
   moldRequired: boolean;
+  // Third-party payment: an agent/company taking a commission on this order.
+  // Recorded for the record and printed on the bill, but deliberately NOT part
+  // of any cost or margin calculation — see lib/order-summary.ts and lib/bill.ts.
+  thirdPartyPayment: boolean;
+  thirdPartyCompany: string;
+  thirdPartyPerson: string;
+  thirdPartyCommissionPct: number;
   packagingDone: boolean; // derived: true once the logo/packaging is APPROVED
   // Packaging / logo design review: upload proofs, then approve or reject.
   packagingMedia: MediaItem[];
@@ -571,6 +578,10 @@ export function blankProduct(name: string): Product {
       shipmentCurrency: "INR",
       shipmentAdvance: 0,
       moldRequired: false,
+      thirdPartyPayment: false,
+      thirdPartyCompany: "",
+      thirdPartyPerson: "",
+      thirdPartyCommissionPct: 0,
       packagingDone: false,
       packagingMedia: [],
       packagingResult: "PENDING",
@@ -836,6 +847,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // True when the initial load failed (offline / DB unreachable), so the UI can
   // distinguish "couldn't load" from "you have no products".
   const [loadFailed, setLoadFailed] = useState(false);
+  // Ids whose edit couldn't be saved yet because the record was still light
+  // (media stripped). ensureFull() flushes them once the media is loaded.
+  const pendingSave = useRef<Set<string>>(new Set());
   const saveProductDebounced = useDebouncedSaver();
   const saveManufacturerDebounced = useDebouncedSaver();
 
@@ -890,7 +904,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         prev.map((p) => {
           if (p.id !== id) return p;
           if (!p._light) return p; // already full (or edited to full) — leave as is
-          return {
+          const next: Product = {
             ...p,
             _light: false,
             _hasPhoto: undefined,
@@ -905,12 +919,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             logistics: { ...p.logistics, docImages: full.logistics.docImages },
             sourcing: full.sourcing ?? p.sourcing,
           };
+          // An edit arrived while this record was still light. patch() couldn't
+          // save it then — that would have written back stripped media — so it
+          // parked the id here. The media is loaded now, so flush it; otherwise
+          // the edit is lost while the UI claims "All changes saved".
+          if (pendingSave.current.delete(id)) {
+            saveProductDebounced(`/api/products/${id}`, stripRuntimeFlags(next));
+          }
+          return next;
         })
       );
     } catch {
       fullLoads.current.delete(id); // allow a retry on failure
     }
-  }, []);
+  }, [saveProductDebounced]);
 
   const setActiveId = useCallback((id: string) => {
     setActiveIdState(id);
@@ -1031,6 +1053,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // Don't autosave while media is still stripped (_light) — that would
           // persist empty media. ensureFull() (triggered on open) fills it first.
           if (p._light) {
+            // Can't save yet — media is stripped and would be persisted empty.
+            // Park it; ensureFull() saves once the full record has loaded.
+            pendingSave.current.add(p.id);
             void ensureFull(p.id);
           } else {
             saveProductDebounced(`/api/products/${p.id}`, stripRuntimeFlags(next));
