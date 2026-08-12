@@ -21,10 +21,11 @@ import {
   Bell,
   Trash2,
 } from "lucide-react";
-import { useStore, type Product } from "@/lib/store";
+import { useStore, type Product, type CurrencyCode } from "@/lib/store";
 import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
+import { useFxRates, convert } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item, motion, AnimatePresence, useReducedMotion } from "./motion";
 import { ProductViewModal } from "./product-view-modal";
@@ -137,15 +138,35 @@ export function DashboardView() {
   }
   // Filters for the product list.
   const [query, setQuery] = useState("");
+  const { rates } = useFxRates();
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  // Capital for the CURRENT (active) product — its agreed total, advance paid,
-  // and the remaining balance, shown in that product's own currency.
-  const capSym = CUR_SYM[active?.working.rateCurrency ?? "INR"] ?? "$";
-  const capTotal = active?.working.rateValue ?? 0;
-  const capPaid = Math.min(active?.working.advancePaid ?? 0, capTotal);
+  // Capital across every product still in process — agreed total, advance paid,
+  // and the balance outstanding. This used to show only the ACTIVE product while
+  // being labelled "Overall capital", so a fully-paid product made it read
+  // "Pending 0" no matter what the rest of the book owed.
+  //
+  // Products are priced in their own currency, so each is converted before being
+  // summed — adding a USD total to an INR one would produce a confident wrong
+  // number. Shown in the active product's currency, or INR by default.
+  const capCur: CurrencyCode = active?.working.rateCurrency ?? "INR";
+  const capSym = CUR_SYM[capCur] ?? "$";
+  const inProcess = products.filter((p) => !p.filed);
+  const cap = inProcess.reduce(
+    (acc, p) => {
+      const cur = p.working.rateCurrency ?? "INR";
+      const total = convert(p.working.rateValue ?? 0, cur, capCur, rates);
+      const paid = Math.min(convert(p.working.advancePaid ?? 0, cur, capCur, rates), total);
+      acc.total += total;
+      acc.paid += paid;
+      return acc;
+    },
+    { total: 0, paid: 0 }
+  );
+  const capTotal = Math.round(cap.total);
+  const capPaid = Math.round(cap.paid);
   const capPending = Math.max(capTotal - capPaid, 0);
 
   const flows = products.map((p) => ({ p, f: getFlow(p) }));
@@ -268,7 +289,9 @@ export function DashboardView() {
             </p>
             <p className="mt-2 text-[14px] font-medium text-body">Overall capital</p>
             <p className="mt-0.5 truncate text-[11px] text-muted">
-              {active ? active.name : "no product selected"}
+              {inProcess.length > 0
+                ? `${inProcess.length} product${inProcess.length === 1 ? "" : "s"} in process`
+                : "no products in process"}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-md bg-go/10 px-2.5 py-1.5">
