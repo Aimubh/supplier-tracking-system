@@ -380,6 +380,7 @@ export function DashboardView() {
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Phase</th>
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Progress</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Order qty</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Paid / due</th>
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Status</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Actions</th>
                   </tr>
@@ -387,7 +388,7 @@ export function DashboardView() {
                 <tbody>
                   {filteredFlows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-5 py-12 text-center text-[13px] text-muted">
+                      <td colSpan={9} className="px-5 py-12 text-center text-[13px] text-muted">
                         No products match these filters.{" "}
                         <button onClick={clearFilters} className="font-medium text-link hover:underline">Clear filters</button>
                       </td>
@@ -521,6 +522,29 @@ function ProductRow({
           </span>
         </td>
 
+        {/* Paid / balance — the advance against this product's own order total,
+            in its own currency (products are priced in USD, INR or CNY). */}
+        <td className="px-3 py-3 text-right">
+          {(() => {
+            const total = p.working.rateValue ?? 0;
+            if (total <= 0) return <span className="text-[13px] text-muted">—</span>;
+            const sym = CUR_SYM[p.working.rateCurrency ?? "INR"] ?? "$";
+            const paid = Math.min(p.working.advancePaid ?? 0, total);
+            const pending = Math.max(total - paid, 0);
+            return (
+              <div className="leading-tight">
+                <span className="figure block text-[13px] font-semibold text-go">
+                  {sym}
+                  {Math.round(paid).toLocaleString()}
+                </span>
+                <span className={clsx("figure block text-[11px]", pending > 0 ? "text-pending" : "text-muted")}>
+                  {pending > 0 ? `${sym}${Math.round(pending).toLocaleString()} due` : "settled"}
+                </span>
+              </div>
+            );
+          })()}
+        </td>
+
         {/* Status */}
         <td className="px-3 py-3">
           {f.alerts.length > 0 ? (
@@ -586,7 +610,7 @@ function ProductRow({
       {/* Expanded detail row (spans all 8 columns) */}
       {open && (
         <tr className="bg-surface">
-          <td colSpan={8} className="p-0">
+          <td colSpan={9} className="p-0">
             <AnimatePresence initial={false}>
               <motion.div
                 initial={reduce ? false : { height: 0, opacity: 0 }}
