@@ -2,7 +2,7 @@
 // a new window for the browser's "Save as PDF" (print) flow. Kept independent of
 // the app's CSS so the printed page is predictable.
 
-import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
+import { itemLabel, type Product, type CurrencyCode, type ExpenseMoneyField } from "./store";
 import { computeOrderSummary, expenseCurrency, paymentDate, paymentFxTable } from "./order-summary";
 import { convert, convertAsOf, type Rates } from "./fx";
 
@@ -176,6 +176,7 @@ export function openOrderBill(
     <h2>Product</h2>
     <div class="grid">
       <div><span>Name</span><span>${esc(p.name)}</span></div>
+      <div><span>Item</span><span>${esc(itemLabel(p) || "—")}</span></div>
       <div><span>Category</span><span>${esc(p.category || "—")}</span></div>
       <div><span>Supplier</span><span>${esc(p.supplier?.name || "—")}</span></div>
       <div><span>Rate term</span><span>${esc(s.rateTerm)}</span></div>

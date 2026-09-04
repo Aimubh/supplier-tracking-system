@@ -451,6 +451,16 @@ export function isPlaceholderName(name: string): boolean {
   return s === "" || UNTITLED.test(s);
 }
 
+// The readable product name ("Makeup Bag - Pink"), shown beneath the SKU.
+// Products are keyed by SKU ("scbag") because that is what the order sheet,
+// the listing master and future imports match on — so the SKU stays the
+// headline and this is the subtitle. Empty when no name was captured, or when
+// it would just repeat the SKU.
+export function itemLabel(p: Product): string {
+  const n = (p.sourcing?.inputs?.itemName ?? "").trim();
+  return n && n.toLowerCase() !== p.name.trim().toLowerCase() ? n : "";
+}
+
 export function blankProduct(name: string): Product {
   return {
     id: uid("p"),

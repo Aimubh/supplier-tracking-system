@@ -20,7 +20,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
-import { useStore, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
+import { useStore, itemLabel, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
 import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
 import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
@@ -282,7 +282,7 @@ function SummaryRow({
         </td>
         <td className="px-3 py-3">
           <span className="text-[14px] font-medium text-ink">{p.name}</span>
-          <p className="text-[11.5px] text-muted">{p.category || "—"} · {p.working.rate}</p>
+          <p className="text-[11.5px] text-muted">{itemLabel(p) || p.category || "—"} · {p.working.rate}</p>
         </td>
         <td className="px-3 py-3 text-right figure text-[13px] text-ink">{cells.qty > 0 ? cells.qty.toLocaleString() : "—"}</td>
         <td className="px-3 py-3 text-right figure text-[13px] text-ink">{cells.order > 0 ? fmtMoney(dispSym, cells.order) : "—"}</td>

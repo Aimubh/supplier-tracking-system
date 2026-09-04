@@ -21,7 +21,7 @@ import {
   Bell,
   Trash2,
 } from "lucide-react";
-import { useStore, type Product, type CurrencyCode } from "@/lib/store";
+import { useStore, itemLabel, type Product, type CurrencyCode } from "@/lib/store";
 import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
@@ -177,7 +177,7 @@ export function DashboardView() {
   // Apply the active filters to the list.
   const q = query.trim().toLowerCase();
   const filteredFlows = flows.filter(({ p, f }) => {
-    if (q && !(`${p.name} ${p.category} ${p.supplier.name}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${p.name} ${itemLabel(p)} ${p.category} ${p.supplier.name}`.toLowerCase().includes(q))) return false;
     if (categoryFilter !== "all" && p.category !== categoryFilter) return false;
     if (phaseFilter !== "all") {
       if (phaseFilter === "complete") {
@@ -488,7 +488,7 @@ function ProductRow({
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 truncate text-[11.5px] text-muted">{f.stageLabel}</p>
+              <p className="mt-0.5 truncate text-[11.5px] text-muted">{itemLabel(p) ? `${itemLabel(p)} · ` : ""}{f.stageLabel}</p>
             </div>
           </div>
         </td>
