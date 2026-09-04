@@ -93,13 +93,6 @@ export function openOrderBill(
     ["Port-to-warehouse transport", cP(p.logistics.indiaTransportCost || 0)],
     ["Other", cField("otherExpense", e.otherExpense || 0)],
   ];
-  // IGST paid at customs is recoverable as input credit, so it is NOT a cost and
-  // is kept out of the totals. It still appears here, muted, so the bill shows
-  // it was excluded on purpose rather than omitted.
-  const igstExcluded = L.igstPaid && L.igstPaid > 0 && !(e.gstCharge && e.gstCharge > 0)
-    ? `<tr><td class="muted">IGST at customs — excluded, recoverable as input credit</td><td class="num muted">(${esc(money(convert(L.igstPaid, "INR", disp, r)))})</td></tr>`
-    : "";
-
   const chargesHtml =
     chargeRows
       .filter(([, v]) => v > 0)
@@ -107,7 +100,7 @@ export function openOrderBill(
         ([label, v]) =>
           `<tr><td>${esc(label)}</td><td class="num">${esc(money(v))}</td></tr>`
       )
-      .join("") + igstExcluded || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
+      .join("") || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
 
   // Payment status — when the product hasn't fully arrived, flag the amount due.
   const statusBanner = s.arrived
