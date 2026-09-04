@@ -11,3 +11,4 @@ __pycache__/
 downloads/
 frames/
 *.log
+alibaba_session.json
