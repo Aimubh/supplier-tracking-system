@@ -3,8 +3,8 @@
 // the app's CSS so the printed page is predictable.
 
 import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
-import { computeOrderSummary, expenseCurrency } from "./order-summary";
-import { convert, type Rates } from "./fx";
+import { computeOrderSummary, expenseCurrency, paymentDate, paymentFxTable } from "./order-summary";
+import { convert, convertAsOf, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
 
@@ -17,29 +17,63 @@ function esc(s: string): string {
 // `display` + `rates` are optional — when provided, every money figure is shown
 // in that currency (matching the Order Summary "Show in" filter). Product amounts
 // are in the product currency; shipment amounts in the shipment currency.
-export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyCode, rates?: Rates | null) {
+export function openOrderBill(
+  p: Product,
+  dateLabel: string,
+  display?: CurrencyCode,
+  rates?: Rates | null,
+  // Historical rate tables by ISO date, so each payment is valued on the day
+  // it was made rather than at today's rate.
+  ratesByDate: Record<string, Rates | null> = {}
+) {
   const r = rates ?? null;
   // Summary figures are normalised into the product currency (using rates), then
   // converted once into the display currency below.
-  const s = computeOrderSummary(p, r);
+  const s = computeOrderSummary(p, r, ratesByDate);
   const prodCur = p.working.rateCurrency ?? "INR";
   const disp = display ?? prodCur;
   const sym = SYM[disp];
   const L = p.logistics;
   const e = p.expenses;
+  const wk = p.working;
+
+  // Third-party commission is disclosed on the bill but deliberately excluded
+  // from every total — computeOrderSummary never sees it. Printing it inside the
+  // Summary table would imply it had been costed.
+  const tp = wk.thirdPartyPayment && (wk.thirdPartyCompany.trim() || wk.thirdPartyCommissionPct > 0);
+  const thirdPartyHtml = tp
+    ? `
+    <h2>Third party</h2>
+    <div class="grid">
+      <div><span>Company</span><span>${esc(wk.thirdPartyCompany.trim() || "—")}</span></div>
+      <div><span>Commission</span><span>${
+        wk.thirdPartyCommissionPct > 0 ? esc(String(wk.thirdPartyCommissionPct)) + "%" : "—"
+      }</span></div>
+    </div>
+    <p class="muted">Disclosed for reference — not included in the totals above.</p>`
+    : "";
   // computeOrderSummary already expressed every aggregate in the product currency,
   // so the display conversion is a single product→display step.
   const cP = (n: number) => convert(n, prodCur, disp, r);
+  // Payment amounts convert at the rate on the day they were settled, not
+  // today's — otherwise a paid invoice changes value every time it's opened.
+  const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") => {
+    // A rate recorded on the remittance beats any market rate — it's what the
+    // money actually cost. Only applies to the USD/INR pair it was entered for.
+    const actual = paymentFxTable(p, field);
+    if (actual && actual[prodCur] && actual[disp]) return convert(n, prodCur, disp, actual);
+    return convertAsOf(n, prodCur, disp, paymentDate(p, field), ratesByDate, r);
+  };
   // Convert a single expense field from ITS OWN currency straight to display.
   const cField = (field: ExpenseMoneyField, n: number) => convert(n, expenseCurrency(p, field), disp, r);
   const money = (n: number) => `${sym}${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
   // Converted aggregates in the display currency.
-  const dGoods = cP(s.goodsTotal);
+  const dGoods = cPay(s.goodsTotal, "rateValue");
   const dExpenses = cP(s.expensesTotal);
   const dFinal = dGoods + dExpenses;
-  const dProdAdv = cP(s.advancePaid);
-  const dShipAdv = cP(s.shipmentAdvance); // already in product currency via summary
+  const dProdAdv = cPay(s.advancePaid, "advancePaid");
+  const dShipAdv = cPay(s.shipmentAdvance, "shipmentAdvance");
   const dTotalPaid = dProdAdv + dShipAdv;
   const dOutstanding = Math.max(dFinal - dTotalPaid, 0);
   const dPerUnit = s.totalQty > 0 ? dFinal / s.totalQty : 0;
@@ -53,12 +87,19 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
     ["CFS — freight station", cField("cfsCharge", e.cfsCharge || 0)],
     ["WGMT — weighment", cField("wgmtCharge", e.wgmtCharge || 0)],
     ["GST on charges", cField("gstCharge", e.gstCharge || 0)],
-    ["Customs duty + IGST", cField("dutyActual", e.dutyActual || 0)],
+    ["Customs duty (BCD + SWS)", cField("dutyActual", e.dutyActual || 0)],
     ["CHA charges", cField("chaCharges", e.chaCharges || 0)],
     ["Last-mile transport", cField("lastMileCost", e.lastMileCost || 0)],
     ["Port-to-warehouse transport", cP(p.logistics.indiaTransportCost || 0)],
     ["Other", cField("otherExpense", e.otherExpense || 0)],
   ];
+  // IGST paid at customs is recoverable as input credit, so it is NOT a cost and
+  // is kept out of the totals. It still appears here, muted, so the bill shows
+  // it was excluded on purpose rather than omitted.
+  const igstExcluded = L.igstPaid && L.igstPaid > 0 && !(e.gstCharge && e.gstCharge > 0)
+    ? `<tr><td class="muted">IGST at customs — excluded, recoverable as input credit</td><td class="num muted">(${esc(money(convert(L.igstPaid, "INR", disp, r)))})</td></tr>`
+    : "";
+
   const chargesHtml =
     chargeRows
       .filter(([, v]) => v > 0)
@@ -66,7 +107,7 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
         ([label, v]) =>
           `<tr><td>${esc(label)}</td><td class="num">${esc(money(v))}</td></tr>`
       )
-      .join("") || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
+      .join("") + igstExcluded || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
 
   // Payment status — when the product hasn't fully arrived, flag the amount due.
   const statusBanner = s.arrived
@@ -172,6 +213,7 @@ export function openOrderBill(p: Product, dateLabel: string, display?: CurrencyC
       ${s.totalQty > 0 ? `<tr><td class="muted">Per unit</td><td class="num muted">${esc(money(dPerUnit))}</td></tr>` : ""}
       ${dueRow}
     </table>
+    ${thirdPartyHtml}
 
     <p class="foot">Generated from the Supplier Tracking System · ${esc(dateLabel)}. Figures in ${esc(disp)}. This is an internal order summary, not a tax invoice.</p>
   </div>

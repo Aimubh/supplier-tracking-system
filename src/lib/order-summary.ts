@@ -4,7 +4,7 @@
 
 import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
 import { getFlow } from "./flow";
-import { convert, type Rates } from "./fx";
+import { convert, convertAsOf, type Rates } from "./fx";
 
 // ---- per-field currency resolution ------------------------------------------
 // Each money field may carry its own currency override. When absent, expense and
@@ -16,6 +16,59 @@ export function prodCurrency(p: Product): CurrencyCode {
 }
 export function shipCurrency(p: Product): CurrencyCode {
   return p.working.shipmentCurrency ?? "INR";
+}
+
+// ---- per-field valuation date ------------------------------------------------
+// A payment is worth what it cost on the day it was made. Converting a May
+// deposit at today's rate makes a settled invoice drift in value every time the
+// page is opened, so each amount is converted at the rate for its own date.
+
+// The date a payment field was settled on. Prefers an actual payment record,
+// then the order date, then undefined (caller falls back to the live rate).
+export function paymentDate(
+  p: Product,
+  field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance"
+): string | undefined {
+  const paid = (p.payments ?? []).filter((x) => x.status === "PAID" && x.paidDate);
+  if (field === "advancePaid") {
+    const deposit = paid.find((x) => x.type === "DEPOSIT") ?? paid[0];
+    if (deposit?.paidDate) return deposit.paidDate;
+  }
+  if (field === "shipmentAdvance") {
+    const freight = paid.find((x) => x.type === "FREIGHT");
+    if (freight?.paidDate) return freight.paidDate;
+  }
+  // Order value is struck when the order is placed.
+  return p.working.productionStart || undefined;
+}
+
+// The rate actually paid, if it was recorded on the payment. Returned as a
+// USD-based table so it drops into convert() unchanged. Only meaningful for
+// USD->INR; anything else falls back to the market rate.
+export function paymentFxTable(
+  p: Product,
+  field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance"
+): Rates | null {
+  const paid = (p.payments ?? []).filter((x) => x.status === "PAID" && x.fxRate);
+  if (paid.length === 0) return null;
+  if (field === "advancePaid" || field === "rateValue") {
+    // Several instalments at different rates: weight by amount so the blended
+    // rate reflects what was actually remitted, not just the first payment's.
+    const total = paid.reduce((a, x) => a + (x.amount || 0), 0);
+    if (total <= 0) return null;
+    const blended = paid.reduce((a, x) => a + (x.amount || 0) * (x.fxRate as number), 0) / total;
+    return { USD: 1, INR: blended };
+  }
+  const freight = paid.find((x) => x.type === "FREIGHT");
+  return freight?.fxRate ? { USD: 1, INR: freight.fxRate } : null;
+}
+
+// Every date this product needs a historical rate for, so a view can preload them.
+export function valuationDates(p: Product): string[] {
+  const fields = ["rateValue", "advancePaid", "shipmentValue", "shipmentAdvance"] as const;
+  const dates = fields.map((f) => paymentDate(p, f));
+  for (const x of p.payments ?? []) if (x.status === "PAID" && x.paidDate) dates.push(x.paidDate);
+  return Array.from(new Set(dates.filter(Boolean) as string[]));
 }
 
 // Currency an itemised expense field is entered in.
@@ -98,7 +151,13 @@ export interface OrderSummary {
 // an identity and the function behaves exactly as before (raw single-currency
 // sums). The summary's figures are therefore all expressed in the product
 // currency; the view/bill then convert that single base into the display currency.
-export function computeOrderSummary(p: Product, rates: Rates | null = null): OrderSummary {
+export function computeOrderSummary(
+  p: Product,
+  rates: Rates | null = null,
+  // Historical tables keyed by ISO date, from useRatesForDates(). When a date
+  // is missing the live table is used, so this stays backward-compatible.
+  ratesByDate: Record<string, Rates | null> = {}
+): OrderSummary {
   const f = getFlow(p);
   const w = p.working;
   const e = p.expenses;
@@ -108,7 +167,8 @@ export function computeOrderSummary(p: Product, rates: Rates | null = null): Ord
   const ex = (field: ExpenseMoneyField) => convert((e[field] as number) || 0, expenseCurrency(p, field), base, rates);
   // Normalise a payment amount from its own currency into the product base.
   const pay = (field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance") =>
-    convert((w[field] as number) || 0, paymentCurrency(p, field), base, rates);
+    convertAsOf((w[field] as number) || 0, paymentCurrency(p, field), base,
+                paymentDate(p, field), ratesByDate, rates);
 
   const totalQty = w.moq || 0;
   const goodsTotal = pay("rateValue");

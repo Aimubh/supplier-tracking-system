@@ -18,19 +18,25 @@ import {
   X,
   FileDown,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import { useStore, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
-import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn } from "@/lib/order-summary";
+import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
-import { useFxRates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
+import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item } from "./motion";
 
 const CURRENCIES: CurrencyCode[] = ["INR", "USD", "CNY"];
 
-function downloadBill(p: Product, show: CurrencyCode, rates: Record<string, number> | null) {
+function downloadBill(
+  p: Product,
+  show: CurrencyCode,
+  rates: Record<string, number> | null,
+  ratesByDate: Record<string, Record<string, number> | null>
+) {
   const date = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  openOrderBill(p, date, show, rates);
+  openOrderBill(p, date, show, rates, ratesByDate);
 }
 
 function fmtMoney(sym: string, n: number) {
@@ -50,7 +56,21 @@ export function OrderSummaryView() {
   // computeOrderSummary normalises every per-field currency into each product's
   // own product currency using live rates; toDisp then converts that base into
   // the chosen display currency.
-  const rows = products.map((p) => ({ p, s: computeOrderSummary(p, fx.rates) }));
+  // Each product's payments are valued at the rate on their own date.
+  const [query, setQuery] = useState("");
+  const ratesByDate = useRatesForDates(products.flatMap(valuationDates));
+  const allRows = products.map((p) => ({ p, s: computeOrderSummary(p, fx.rates, ratesByDate) }));
+  // Search across the fields you'd actually look a product up by. Totals below
+  // are computed from the filtered rows, so they answer "what does this
+  // supplier owe me" rather than always showing the whole book.
+  const q = query.trim().toLowerCase();
+  const rows = q
+    ? allRows.filter(({ p }) =>
+        `${p.name} ${p.category} ${p.supplier?.name ?? ""} ${p.po?.poNumber ?? ""} ${p.sourcing?.inputs?.itemName ?? ""}`
+          .toLowerCase()
+          .includes(q)
+      )
+    : allRows;
 
   // Portfolio totals — converted to the display currency per product source.
   const tot = rows.reduce(
@@ -91,6 +111,32 @@ export function OrderSummaryView() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search across product, supplier, category and invoice number */}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search product, supplier, invoice…"
+              className="h-9 w-[280px] rounded-sm border border-line bg-white pl-9 pr-8 text-[13px] text-ink placeholder:text-muted focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted transition hover:text-ink"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {query && (
+            <span className="text-[12px] text-muted">
+              {rows.length} of {allRows.length}
+            </span>
+          )}
+
         {/* Currency conversion filter */}
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-medium text-muted">Show in</span>
@@ -111,6 +157,7 @@ export function OrderSummaryView() {
           >
             <RefreshCw className={clsx("h-4 w-4", fx.loading && "animate-spin")} />
           </button>
+        </div>
         </div>
       </div>
 
@@ -139,13 +186,15 @@ export function OrderSummaryView() {
             <span className="text-[11px] text-muted">All figures in {show}</span>
           </div>
 
-          {products.length === 0 ? (
+          {rows.length === 0 ? (
             <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-ink text-white">
                 <PackageOpen className="h-6 w-6" />
               </div>
               <p className="max-w-sm text-[14px] text-muted">
-                No products yet. Once a product is in the pipeline, its financial summary appears here.
+                {q
+                  ? `No product matches "${query.trim()}". Try a supplier name or invoice number.`
+                  : "No products yet. Once a product is in the pipeline, its financial summary appears here."}
               </p>
             </div>
           ) : (
@@ -172,6 +221,7 @@ export function OrderSummaryView() {
                       <SummaryRow
                         key={p.id}
                         p={p}
+                        ratesByDate={ratesByDate}
                         open={openId === p.id}
                         onToggle={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
                         dispSym={dispSym}
@@ -207,6 +257,7 @@ function SummaryRow({
   dispSym,
   show,
   rates,
+  ratesByDate,
   toDisp,
   cells,
 }: {
@@ -216,6 +267,7 @@ function SummaryRow({
   dispSym: string;
   show: CurrencyCode;
   rates: Record<string, number> | null;
+  ratesByDate: Record<string, Record<string, number> | null>;
   toDisp: (n: number, from: CurrencyCode) => number;
   cells: { qty: number; order: number; paid: number; expenses: number; final: number; profit: number; profitable: boolean | null };
 }) {
@@ -248,7 +300,7 @@ function SummaryRow({
               </span>
             )}
             <button
-              onClick={(ev) => { ev.stopPropagation(); downloadBill(p, show, rates); }}
+              onClick={(ev) => { ev.stopPropagation(); downloadBill(p, show, rates, ratesByDate); }}
               title="Download order bill (PDF)"
               className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[12px] font-medium text-ink transition hover:bg-surface"
             >
@@ -261,7 +313,8 @@ function SummaryRow({
       {open && (
         <tr className="bg-surface">
           <td colSpan={8} className="p-0">
-            <PnlSheet p={p} show={show} dispSym={dispSym} rates={rates} toDisp={toDisp} />
+            <PnlSheet p={p} show={show} dispSym={dispSym} rates={rates}
+              ratesByDate={ratesByDate} toDisp={toDisp} />
           </td>
         </tr>
       )}
@@ -277,12 +330,14 @@ function PnlSheet({
   show,
   dispSym,
   rates,
+  ratesByDate,
   toDisp,
 }: {
   p: Product;
   show: CurrencyCode;
   dispSym: string;
   rates: Record<string, number> | null;
+  ratesByDate: Record<string, Record<string, number> | null>;
   toDisp: (n: number, from: CurrencyCode) => number;
 }) {
   const { patchProduct } = useStore();
@@ -465,7 +520,7 @@ function PnlSheet({
               )}
             </dl>
             <button
-              onClick={() => downloadBill(p, show, rates)}
+              onClick={() => downloadBill(p, show, rates, ratesByDate)}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-[14px] font-medium text-white transition hover:bg-brand-600"
             >
               <FileDown className="h-4 w-4" /> Download order bill (PDF)

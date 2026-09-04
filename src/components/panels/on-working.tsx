@@ -306,6 +306,44 @@ export function ProductDecisionPanel() {
       <SubHead title="Mould setup" hint="Tick if mould / tooling setup is applicable for this product." />
       <Toggle on={w.moldRequired} onChange={(v) => setField("moldRequired", v)} label="Mould / tooling setup applicable" />
 
+      {/* Third-party payment — recorded and printed on the bill, never costed. */}
+      <SubHead
+        title="Third party payment"
+        hint="Agent or company taking a commission on this order. Shown on the order bill; not added to any cost or margin."
+      />
+      <Toggle
+        on={w.thirdPartyPayment}
+        onChange={(v) => setField("thirdPartyPayment", v)}
+        label="Third party payment applicable"
+      />
+      {w.thirdPartyPayment && (
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <Field label="Third party company">
+            <Text
+              value={w.thirdPartyCompany}
+              onChange={(v) => setField("thirdPartyCompany", v)}
+              placeholder="Sourcing agent Pvt. Ltd."
+            />
+          </Field>
+          <Field label="Contact person">
+            <Text
+              value={w.thirdPartyPerson}
+              onChange={(v) => setField("thirdPartyPerson", v)}
+              placeholder="full name"
+            />
+          </Field>
+          <Field label="Commission (%)">
+            <Num
+              value={w.thirdPartyCommissionPct}
+              onChange={(v) => setField("thirdPartyCommissionPct", v)}
+              prefix="%"
+              placeholder="0"
+              blankZero
+            />
+          </Field>
+        </div>
+      )}
+
       <SaveBar dirty={dirty} saved={saved} onSave={() => { patch("working", draft); flashSaved(); }} onDiscard={discard} tab="on-working" />
     </div>
   );

@@ -8,6 +8,12 @@ import type { CurrencyCode } from "./store";
 
 const FX_URL = "https://open.er-api.com/v6/latest/USD";
 
+// Historical rates, by date. A payment made in May must be valued at May's rate,
+// not today's — otherwise a settled invoice keeps changing value every time the
+// page is opened. open.er-api.com serves only the latest rate, so dated lookups
+// go to Frankfurter (ECB reference rates, free, no key).
+const FX_HISTORICAL_URL = "https://api.frankfurter.dev/v1";
+
 export type Rates = Record<string, number>;
 
 let ratesCache: { rates: Rates; fetchedAt: number } | null = null;
@@ -32,6 +38,40 @@ async function fetchRates(force = false): Promise<Rates | null> {
     }
   })();
   return inflight;
+}
+
+// One cache entry per ISO date. Historical rates never change, so these are
+// kept for the life of the page.
+const historicalCache = new Map<string, Rates | null>();
+const historicalInflight = new Map<string, Promise<Rates | null>>();
+
+// Rates as they stood on `date` (YYYY-MM-DD). Returns null if unavailable, so
+// callers can fall back to the live table rather than silently mis-converting.
+export async function fetchRatesOn(date: string): Promise<Rates | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (historicalCache.has(date)) return historicalCache.get(date) ?? null;
+  const pending = historicalInflight.get(date);
+  if (pending) return pending;
+
+  const p = (async () => {
+    try {
+      const res = await fetch(`${FX_HISTORICAL_URL}/${date}?base=USD`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data?.rates) throw new Error("no rates");
+      // Frankfurter omits the base currency from the table; convert() needs it.
+      const rates: Rates = { USD: 1, ...data.rates };
+      historicalCache.set(date, rates);
+      return rates;
+    } catch {
+      historicalCache.set(date, null); // don't retry a bad date every render
+      return null;
+    } finally {
+      historicalInflight.delete(date);
+    }
+  })();
+  historicalInflight.set(date, p);
+  return p;
 }
 
 // Convert an amount from one currency to another via the USD-based table.
@@ -69,3 +109,48 @@ export function useFxRates() {
 }
 
 export const CURRENCY_SYMBOL: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
+
+// Convert using the rate that applied on `date`, falling back to the live table
+// when that date hasn't loaded (or the API had no data for it). `byDate` is what
+// useRatesForDates() returns.
+export function convertAsOf(
+  amount: number,
+  from: CurrencyCode,
+  to: CurrencyCode,
+  date: string | undefined,
+  byDate: Record<string, Rates | null>,
+  live: Rates | null
+): number {
+  const dated = date ? byDate[date] : null;
+  return convert(amount, from, to, dated ?? live);
+}
+
+// Load the historical tables for a set of dates. Re-renders as each arrives, so
+// figures settle onto their correct rate rather than blocking the page.
+export function useRatesForDates(dates: (string | undefined)[]) {
+  const [byDate, setByDate] = useState<Record<string, Rates | null>>({});
+  // Stable key so the effect only re-runs when the actual set of dates changes.
+  const key = Array.from(new Set(dates.filter(Boolean) as string[])).sort().join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    const wanted = key ? key.split(",") : [];
+    if (wanted.length === 0) return;
+    (async () => {
+      const entries = await Promise.all(
+        wanted.map(async (d) => [d, await fetchRatesOn(d)] as const)
+      );
+      if (cancelled) return;
+      setByDate((prev) => {
+        const next = { ...prev };
+        for (const [d, r] of entries) next[d] = r;
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+
+  return byDate;
+}
