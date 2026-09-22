@@ -343,7 +343,7 @@ export function CustomClearancePanel() {
           <Field label="IGST (₹)"><Num value={l.igstPaid} onChange={(v) => setField("igstPaid", v)} prefix="₹" /></Field>
         </div>
         <div className="mt-4 sm:max-w-xs">
-          <Stat label="Total duty payable" value={`₹${totalPayable.toLocaleString()}`} tone={l.dutyCharged ? "go" : "pending"} />
+          <Stat label="Total payable to customs (incl. IGST)" value={`₹${totalPayable.toLocaleString()}`} tone={l.dutyCharged ? "go" : "pending"} />
         </div>
       </div>
       <SaveBar dirty={dirty} saved={saved} onSave={() => { patch("logistics", draft); flashSaved(); }} onDiscard={discard} tab="post-order" />

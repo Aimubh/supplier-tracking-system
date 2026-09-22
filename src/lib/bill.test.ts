@@ -10,6 +10,21 @@ const bill = readFileSync(new URL("./bill.ts", import.meta.url), "utf8");
 const summary = readFileSync(new URL("./order-summary.ts", import.meta.url), "utf8");
 const costing = readFileSync(new URL("./costing.ts", import.meta.url), "utf8");
 
+// Every view that shows a goods / advance amount must value it at the rate the
+// payment was actually made (convertPayment), never at today's rate — or the
+// bill and the Order Summary drift apart on a paid order.
+for (const view of ["../components/order-summary-view.tsx", "../components/dashboard-view.tsx"]) {
+  const src = readFileSync(new URL(view, import.meta.url), "utf8");
+  assert.ok(src.includes("convertPayment("), `${view} must value payments via convertPayment`);
+  assert.ok(!/convert\(\s*p\.working\.(rateValue|advancePaid)/.test(src), `${view} converts a payment at today's rate`);
+}
+assert.ok(bill.includes("convertPayment("), "bill must value payments via convertPayment");
+// The bill lists each remittance with its date, amount and bank rate, so the
+// goods figure can be re-added by hand. It sits before the charges table.
+assert.ok(bill.includes("<h2>Payments</h2>"), "bill needs a Payments section");
+assert.ok(bill.includes("${paymentsHtml}"), "Payments section must be rendered");
+assert.ok(bill.indexOf("${paymentsHtml}") < bill.indexOf("<h2>Charges"), "Payments come before charges");
+
 // The bill discloses the company and the commission percentage.
 assert.ok(bill.includes("thirdPartyCompany"), "bill must print the third-party company");
 assert.ok(bill.includes("thirdPartyCommissionPct"), "bill must print the commission %");

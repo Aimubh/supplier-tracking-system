@@ -25,7 +25,8 @@ import { useStore, itemLabel, type Product, type CurrencyCode } from "@/lib/stor
 import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
-import { useFxRates, convert } from "@/lib/fx";
+import { useFxRates, useRatesForDates } from "@/lib/fx";
+import { convertPayment, valuationDates } from "@/lib/order-summary";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item, motion, AnimatePresence, useReducedMotion } from "./motion";
 import { ProductViewModal } from "./product-view-modal";
@@ -139,6 +140,7 @@ export function DashboardView() {
   // Filters for the product list.
   const [query, setQuery] = useState("");
   const { rates } = useFxRates();
+  const ratesByDate = useRatesForDates(products.flatMap(valuationDates));
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -157,8 +159,9 @@ export function DashboardView() {
   const cap = inProcess.reduce(
     (acc, p) => {
       const cur = p.working.rateCurrency ?? "INR";
-      const total = convert(p.working.rateValue ?? 0, cur, capCur, rates);
-      const paid = Math.min(convert(p.working.advancePaid ?? 0, cur, capCur, rates), total);
+      // At the rate each payment was actually made, not today's.
+      const total = convertPayment(p, p.working.rateValue ?? 0, "rateValue", cur, capCur, rates, ratesByDate);
+      const paid = Math.min(convertPayment(p, p.working.advancePaid ?? 0, "advancePaid", cur, capCur, rates, ratesByDate), total);
       acc.total += total;
       acc.paid += paid;
       return acc;

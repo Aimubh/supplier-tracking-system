@@ -21,7 +21,7 @@ import {
   Search,
 } from "lucide-react";
 import { useStore, itemLabel, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
-import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
+import { computeOrderSummary, convertPayment, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
 import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
@@ -76,9 +76,12 @@ export function OrderSummaryView() {
   const tot = rows.reduce(
     (a, { p, s }) => {
       const prodCur = p.working.rateCurrency ?? "INR";
-      a.goods += toDisp(s.goodsTotal, prodCur);
-      a.expenses += toDisp(s.expensesTotal, prodCur); // expenses entered in product currency
-      a.final += toDisp(s.finalExpense, prodCur);
+      // Goods at the rate actually paid; expenses at today's (they're INR anyway).
+      const goods = convertPayment(p, s.goodsTotal, "rateValue", prodCur, show, fx.rates, ratesByDate);
+      const expenses = toDisp(s.expensesTotal, prodCur); // expenses entered in product currency
+      a.goods += goods;
+      a.expenses += expenses;
+      a.final += goods + expenses;
       a.selling += toDisp(s.sellingTotal, prodCur);
       a.profit += toDisp(s.profit, prodCur);
       return a;
@@ -216,6 +219,9 @@ export function OrderSummaryView() {
                   {rows.map(({ p, s }) => {
                     const prodCur = p.working.rateCurrency ?? "INR";
                     const c = (n: number) => toDisp(n, prodCur);
+                    const cPay = (n: number, field: "rateValue" | "advancePaid") =>
+                      convertPayment(p, n, field, prodCur, show, fx.rates, ratesByDate);
+                    const order = cPay(s.goodsTotal, "rateValue");
                     const profit = c(s.profit);
                     return (
                       <SummaryRow
@@ -230,10 +236,10 @@ export function OrderSummaryView() {
                         toDisp={toDisp}
                         cells={{
                           qty: s.totalQty,
-                          order: c(s.goodsTotal),
-                          paid: c(s.advancePaid),
+                          order,
+                          paid: cPay(s.advancePaid, "advancePaid"),
                           expenses: c(s.expensesTotal),
-                          final: c(s.finalExpense),
+                          final: order + c(s.expensesTotal),
                           profit,
                           profitable: s.profitable,
                         }}
@@ -366,9 +372,12 @@ function PnlSheet({
 
   // Derived figures in the display currency — each amount converted from its own
   // resolved currency.
-  const goodsTotal = toDisp(w.rateValue || 0, payCur("rateValue"));
-  const prodAdv = toDisp(Math.min(w.advancePaid || 0, w.rateValue || 0), payCur("advancePaid"));
-  const shipAdv = toDisp(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), payCur("shipmentAdvance"));
+  // Payments are valued at the rate they were actually settled at, same as the bill.
+  const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") =>
+    convertPayment(p, n, field, payCur(field), show, rates, ratesByDate);
+  const goodsTotal = cPay(w.rateValue || 0, "rateValue");
+  const prodAdv = cPay(Math.min(w.advancePaid || 0, w.rateValue || 0), "advancePaid");
+  const shipAdv = cPay(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), "shipmentAdvance");
   const freightFields: ExpenseMoneyField[] = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge"];
   const otherFields: ExpenseMoneyField[] = ["dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
   // Total expenses in the display currency — convert each field from its own currency.
@@ -383,7 +392,7 @@ function PnlSheet({
   const COST_LABELS: Record<string, string> = {
     oceanFreight: "Ocean freight", doCharge: "DO charge", thcCharge: "THC (terminal handling)",
     cfsCharge: "CFS (freight station)", wgmtCharge: "WGMT (weighment)", gstCharge: "GST on charges",
-    dutyActual: "Customs duty + IGST", chaCharges: "CHA charges", lastMileCost: "Last-mile (extra)",
+    dutyActual: "Customs duty (BCD + SWS)", chaCharges: "CHA charges", lastMileCost: "Last-mile (extra)",
     otherExpense: "Other", indiaTransport: "Port-to-warehouse transport",
   };
   const costLines: { label: string; amount: number }[] = [
@@ -400,7 +409,7 @@ function PnlSheet({
     gstCharge: { label: "GST", hint: "on destination charges" },
   };
   const OTHER_META: Record<string, { label: string; hint: string }> = {
-    dutyActual: { label: "Duty + IGST", hint: "customs duty & taxes" },
+    dutyActual: { label: "Customs duty", hint: "BCD + SWS — IGST excluded (input credit)" },
     chaCharges: { label: "CHA charges", hint: "clearing agent fees" },
     lastMileCost: { label: "Last-mile (extra)", hint: "adds to India transport" },
     otherExpense: { label: "Other", hint: "inspection, insurance…" },

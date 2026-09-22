@@ -3,7 +3,7 @@
 // the app's CSS so the printed page is predictable.
 
 import { itemLabel, type Product, type CurrencyCode, type ExpenseMoneyField } from "./store";
-import { computeOrderSummary, expenseCurrency, paymentDate, paymentFxTable } from "./order-summary";
+import { computeOrderSummary, convertPayment, expenseCurrency } from "./order-summary";
 import { convert, convertAsOf, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
@@ -57,13 +57,8 @@ export function openOrderBill(
   const cP = (n: number) => convert(n, prodCur, disp, r);
   // Payment amounts convert at the rate on the day they were settled, not
   // today's — otherwise a paid invoice changes value every time it's opened.
-  const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") => {
-    // A rate recorded on the remittance beats any market rate — it's what the
-    // money actually cost. Only applies to the USD/INR pair it was entered for.
-    const actual = paymentFxTable(p, field);
-    if (actual && actual[prodCur] && actual[disp]) return convert(n, prodCur, disp, actual);
-    return convertAsOf(n, prodCur, disp, paymentDate(p, field), ratesByDate, r);
-  };
+  const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") =>
+    convertPayment(p, n, field, prodCur, disp, r, ratesByDate);
   // Convert a single expense field from ITS OWN currency straight to display.
   const cField = (field: ExpenseMoneyField, n: number) => convert(n, expenseCurrency(p, field), disp, r);
   const money = (n: number) => `${sym}${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -102,6 +97,43 @@ export function openOrderBill(
       )
       .join("") || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
 
+  // Each remittance on its own line: the day it went out, the foreign amount, the
+  // rate the bank gave, and what it cost in the display currency. This is the
+  // audit trail for "Order amount" — the reader can re-add it by hand.
+  const PAY_LABEL: Record<string, string> = {
+    DEPOSIT: "Deposit", BALANCE: "Balance", FREIGHT: "Freight", DUTY: "Duty", CHA: "CHA", OTHER: "Other",
+  };
+  const payRows = (p.payments ?? [])
+    .filter((x) => (x.amount || 0) > 0)
+    .map((x) => {
+      const cur = (x.currency || prodCur) as CurrencyCode;
+      const date = x.paidDate || x.dueDate;
+      // A rate recorded on the remittance is the truth; otherwise the market rate that day.
+      const bank = x.fxRate && cur === "USD" && disp === "INR" ? { USD: 1, INR: x.fxRate } : null;
+      const val = bank ? convert(x.amount, cur, disp, bank) : convertAsOf(x.amount, cur, disp, date, ratesByDate, r);
+      const rate = cur === disp ? null : bank ? x.fxRate : val / x.amount;
+      const status = x.status === "PAID" ? "" : ` <span class="muted">(pending)</span>`;
+      return `<tr><td>${esc(date || "—")}</td><td>${esc(PAY_LABEL[x.type] ?? x.type)}${status}</td>` +
+        `<td class="num">${esc(SYM[cur] ?? "")}${esc(x.amount.toLocaleString())}</td>` +
+        `<td class="num">${rate ? esc(rate.toLocaleString(undefined, { maximumFractionDigits: 4 })) : "—"}</td>` +
+        `<td class="num">${esc(money(val))}</td></tr>`;
+    });
+  const paymentsHtml = payRows.length
+    ? `
+    <h2>Payments</h2>
+    <table>
+      <tr class="head"><td>Date</td><td>Payment</td><td class="num">Amount</td><td class="num">Rate</td><td class="num">Value (${esc(disp)})</td></tr>
+      ${payRows.join("")}
+    </table>
+    <p class="muted" style="font-size:11px;margin:6px 0 0">Each payment is valued at the exchange rate on the day it was made.</p>`
+    : "";
+
+  // First product photo. Records from the light list arrive with media stripped,
+  // so for those the photo is pulled in after the window opens (see the end).
+  const firstPhoto = (w: Product["working"] | undefined) =>
+    w?.productMedia?.find((m) => m.kind === "image")?.data || w?.productImage || "";
+  const photo = firstPhoto(wk);
+
   // Payment status — when the product hasn't fully arrived, flag the amount due.
   const statusBanner = s.arrived
     ? `<div class="status paid">✓ Order arrived &amp; settled — ${esc(money(dTotalPaid))} paid of ${esc(money(dFinal))}.</div>`
@@ -130,6 +162,9 @@ export function openOrderBill(
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   td { padding: 7px 0; border-bottom: 1px solid #eee; vertical-align: top; }
   td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.head td { font-size: 11px; color: #41454d; text-transform: uppercase; letter-spacing: .08em; }
+  .photo { display: block; width: 132px; height: 132px; object-fit: cover; border: 1px solid #e6e6e6; border-radius: 8px; margin: 4px 0 12px; }
+  .photo[hidden] { display: none; }
   .muted { color: #9297a0; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; font-size: 13px; margin-top: 6px; }
   .grid div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f1f1f1; }
@@ -174,6 +209,7 @@ export function openOrderBill(
     ${statusBanner}
 
     <h2>Product</h2>
+    <img id="photo" class="photo" alt="" src="${esc(photo)}"${photo ? "" : " hidden"}>
     <div class="grid">
       <div><span>Name</span><span>${esc(p.name)}</span></div>
       <div><span>Item</span><span>${esc(itemLabel(p) || "—")}</span></div>
@@ -195,6 +231,7 @@ export function openOrderBill(
       <div><span>Start date</span><span>${esc(s.startDate || "—")}</span></div>
       <div><span>End date</span><span>${esc(s.endDate || "—")}</span></div>
     </div>
+    ${paymentsHtml}
 
     <h2>Charges &amp; expenses (${esc(disp)})</h2>
     <table>${chargesHtml}</table>
@@ -221,4 +258,17 @@ export function openOrderBill(
   }
   w.document.write(html);
   w.document.close();
+
+  // The window had to open synchronously inside the click (or pop-up blockers
+  // eat it), so a light record's photo is fetched now and dropped into place.
+  if (!photo && p._light) {
+    fetch(`/api/products/${p.id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((full: Partial<Product> | null) => {
+        const src = firstPhoto(full?.working);
+        const img = w.document.getElementById("photo") as HTMLImageElement | null;
+        if (src && img) { img.src = src; img.hidden = false; }
+      })
+      .catch(() => {}); // a bill without a photo is still a correct bill
+  }
 }

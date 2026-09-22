@@ -63,6 +63,25 @@ export function paymentFxTable(
   return freight?.fxRate ? { USD: 1, INR: freight.fxRate } : null;
 }
 
+// Convert a payment figure into the display currency at the rate the money
+// actually moved: the rate recorded on the remittance when there is one, else
+// the market rate on the payment date, else live. Every view that shows a goods
+// or advance amount goes through here, so the bill, the Order Summary and the
+// dashboard can never disagree on what a paid order cost.
+export function convertPayment(
+  p: Product,
+  n: number,
+  field: "rateValue" | "advancePaid" | "shipmentValue" | "shipmentAdvance",
+  from: CurrencyCode,
+  to: CurrencyCode,
+  rates: Rates | null,
+  ratesByDate: Record<string, Rates | null> = {}
+): number {
+  const actual = paymentFxTable(p, field);
+  if (actual && actual[from] && actual[to]) return convert(n, from, to, actual);
+  return convertAsOf(n, from, to, paymentDate(p, field), ratesByDate, rates);
+}
+
 // Every date this product needs a historical rate for, so a view can preload them.
 export function valuationDates(p: Product): string[] {
   const fields = ["rateValue", "advancePaid", "shipmentValue", "shipmentAdvance"] as const;
