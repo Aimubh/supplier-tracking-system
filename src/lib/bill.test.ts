@@ -59,3 +59,12 @@ assert.ok(
 );
 
 console.log("bill: third-party disclosed, not costed — all checks passed");
+
+// Per-piece: a set-of-N listing (packUnits > 1) must show its own line, derived
+// from per-unit divided by packUnits — never a separate hand-typed figure that
+// could drift from the unit price.
+assert.ok(bill.includes("dPerPiece"), "bill must compute a per-piece figure");
+assert.ok(bill.includes("packUnits > 1 ? dPerUnit / packUnits"), "per-piece must derive from per-unit, not stand alone");
+assert.ok(/Per piece/.test(bill), "bill needs a Per piece line for multi-piece units");
+
+console.log("bill: per-piece line derives from per-unit — all checks passed");

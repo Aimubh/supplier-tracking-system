@@ -72,6 +72,10 @@ export function openOrderBill(
   const dTotalPaid = dProdAdv + dShipAdv;
   const dOutstanding = Math.max(dFinal - dTotalPaid, 0);
   const dPerUnit = s.totalQty > 0 ? dFinal / s.totalQty : 0;
+  // Pieces per unit (set/pack) — see order-summary-view.tsx for the editable
+  // field. Only worth its own line when it differs from "per unit".
+  const packUnits = p.sourcing?.inputs?.packUnits || 1;
+  const dPerPiece = packUnits > 1 ? dPerUnit / packUnits : dPerUnit;
 
   // Itemised charge rows (skip zero lines to keep the bill tidy). Each row is
   // converted from its own field currency; India transport is in product currency.
@@ -242,6 +246,7 @@ export function openOrderBill(
       <tr class="rule"><td>Total expenses</td><td class="num">${esc(money(dExpenses))}</td></tr>
       <tr class="final"><td><strong>Final landed cost</strong></td><td class="num"><strong>${esc(money(dFinal))}</strong></td></tr>
       ${s.totalQty > 0 ? `<tr><td class="muted">Per unit</td><td class="num muted">${esc(money(dPerUnit))}</td></tr>` : ""}
+      ${s.totalQty > 0 && packUnits > 1 ? `<tr><td class="muted">Per piece (${esc(String(packUnits))}/unit)</td><td class="num muted">${esc(money(dPerPiece))}</td></tr>` : ""}
       ${dueRow}
     </table>
     ${thirdPartyHtml}

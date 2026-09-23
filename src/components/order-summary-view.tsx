@@ -360,6 +360,13 @@ function PnlSheet({
   const setLogistics = <K extends keyof Logistics>(key: K, value: Logistics[K]) =>
     patchProduct(p.id, "logistics", { ...l, [key]: value });
 
+  // Pieces per unit (set/pack) — a set-of-5 pouch listing has packUnits=5, so a
+  // ₹53 "per unit" price is really ₹10.60 per piece. Lives on sourcing.inputs
+  // (packUnits already existed there, unused by any view until now).
+  const packUnits = p.sourcing?.inputs?.packUnits || 1;
+  const setPackUnits = (v: number) =>
+    patchProduct(p.id, "sourcing", { ...p.sourcing, inputs: { ...p.sourcing.inputs, packUnits: v || 1 } });
+
   // Per-field currency: resolve and update. Overrides live in expenses.fieldCurrency
   // / working.paymentCurrency; clearing one back to the section currency just drops
   // the key. Each setter writes a fresh map so the store auto-save fires.
@@ -384,6 +391,9 @@ function PnlSheet({
   const expensesDisp = expensesIn(p, show, rates);
   const finalDisp = goodsTotal + expensesDisp;
   const perUnit = (w.moq || 0) > 0 ? finalDisp / (w.moq as number) : 0;
+  // Per piece = per unit split across the pieces in each unit (set/pack). Only
+  // meaningfully different from "per unit" when packUnits > 1 (a set of 5, say).
+  const perPiece = packUnits > 1 ? perUnit / packUnits : perUnit;
   const arrived = !!l.handedToInventory;
   const outstanding = Math.max(finalDisp - (prodAdv + shipAdv), 0);
 
@@ -428,6 +438,7 @@ function PnlSheet({
             <p className="eyebrow mb-3">Order</p>
             <div className="grid grid-cols-2 gap-3">
               <FieldNum label="Quantity (MOQ)" value={w.moq} onChange={(v) => setWorking("moq", v)} />
+              <FieldNum label="Pieces / unit" value={packUnits} onChange={setPackUnits} />
               <FieldSelect label="Rate term" value={w.rate} options={["FOB", "CIF", "EXW", "FCA"]} onChange={(v) => setWorking("rate", v as Working["rate"])} />
               <FieldDate label="Start date" value={w.productionStart} onChange={(v) => setWorking("productionStart", v)} />
               <FieldDate label="End date (out-of-charge)" value={l.outOfChargeDate} onChange={(v) => setLogistics("outOfChargeDate", v)} />
@@ -517,7 +528,9 @@ function PnlSheet({
               <div className="border-t border-line pt-2">
                 <Line label="= Total landed cost" value={fmtMoney(dispSym, finalDisp)} bold />
                 <p className="mt-0.5 text-right text-[11px] text-muted">
-                  {(w.moq || 0) > 0 ? `${fmtMoney(dispSym, perUnit)} / unit · ` : ""}factory → our warehouse, all-in
+                  {(w.moq || 0) > 0 ? `${fmtMoney(dispSym, perUnit)} / unit` : ""}
+                  {(w.moq || 0) > 0 && packUnits > 1 ? ` (${fmtMoney(dispSym, perPiece)} / piece)` : ""}
+                  {(w.moq || 0) > 0 ? " · " : ""}factory → our warehouse, all-in
                 </p>
               </div>
 
