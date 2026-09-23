@@ -21,10 +21,12 @@ import {
   Bell,
   Trash2,
 } from "lucide-react";
-import { useStore, type Product } from "@/lib/store";
+import { useStore, itemLabel, type Product, type CurrencyCode } from "@/lib/store";
 import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
+import { useFxRates, useRatesForDates } from "@/lib/fx";
+import { convertPayment, valuationDates } from "@/lib/order-summary";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item, motion, AnimatePresence, useReducedMotion } from "./motion";
 import { ProductViewModal } from "./product-view-modal";
@@ -137,15 +139,37 @@ export function DashboardView() {
   }
   // Filters for the product list.
   const [query, setQuery] = useState("");
+  const { rates } = useFxRates();
+  const ratesByDate = useRatesForDates(products.flatMap(valuationDates));
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  // Capital for the CURRENT (active) product — its agreed total, advance paid,
-  // and the remaining balance, shown in that product's own currency.
-  const capSym = CUR_SYM[active?.working.rateCurrency ?? "INR"] ?? "$";
-  const capTotal = active?.working.rateValue ?? 0;
-  const capPaid = Math.min(active?.working.advancePaid ?? 0, capTotal);
+  // Capital across every product still in process — agreed total, advance paid,
+  // and the balance outstanding. This used to show only the ACTIVE product while
+  // being labelled "Overall capital", so a fully-paid product made it read
+  // "Pending 0" no matter what the rest of the book owed.
+  //
+  // Products are priced in their own currency, so each is converted before being
+  // summed — adding a USD total to an INR one would produce a confident wrong
+  // number. Shown in the active product's currency, or INR by default.
+  const capCur: CurrencyCode = active?.working.rateCurrency ?? "INR";
+  const capSym = CUR_SYM[capCur] ?? "$";
+  const inProcess = products.filter((p) => !p.filed);
+  const cap = inProcess.reduce(
+    (acc, p) => {
+      const cur = p.working.rateCurrency ?? "INR";
+      // At the rate each payment was actually made, not today's.
+      const total = convertPayment(p, p.working.rateValue ?? 0, "rateValue", cur, capCur, rates, ratesByDate);
+      const paid = Math.min(convertPayment(p, p.working.advancePaid ?? 0, "advancePaid", cur, capCur, rates, ratesByDate), total);
+      acc.total += total;
+      acc.paid += paid;
+      return acc;
+    },
+    { total: 0, paid: 0 }
+  );
+  const capTotal = Math.round(cap.total);
+  const capPaid = Math.round(cap.paid);
   const capPending = Math.max(capTotal - capPaid, 0);
 
   const flows = products.map((p) => ({ p, f: getFlow(p) }));
@@ -156,7 +180,7 @@ export function DashboardView() {
   // Apply the active filters to the list.
   const q = query.trim().toLowerCase();
   const filteredFlows = flows.filter(({ p, f }) => {
-    if (q && !(`${p.name} ${p.category} ${p.supplier.name}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${p.name} ${itemLabel(p)} ${p.category} ${p.supplier.name}`.toLowerCase().includes(q))) return false;
     if (categoryFilter !== "all" && p.category !== categoryFilter) return false;
     if (phaseFilter !== "all") {
       if (phaseFilter === "complete") {
@@ -268,7 +292,9 @@ export function DashboardView() {
             </p>
             <p className="mt-2 text-[14px] font-medium text-body">Overall capital</p>
             <p className="mt-0.5 truncate text-[11px] text-muted">
-              {active ? active.name : "no product selected"}
+              {inProcess.length > 0
+                ? `${inProcess.length} product${inProcess.length === 1 ? "" : "s"} in process`
+                : "no products in process"}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-md bg-go/10 px-2.5 py-1.5">
@@ -357,6 +383,7 @@ export function DashboardView() {
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Phase</th>
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Progress</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Order qty</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Paid / due</th>
                     <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Status</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Actions</th>
                   </tr>
@@ -364,7 +391,7 @@ export function DashboardView() {
                 <tbody>
                   {filteredFlows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-5 py-12 text-center text-[13px] text-muted">
+                      <td colSpan={9} className="px-5 py-12 text-center text-[13px] text-muted">
                         No products match these filters.{" "}
                         <button onClick={clearFilters} className="font-medium text-link hover:underline">Clear filters</button>
                       </td>
@@ -464,7 +491,7 @@ function ProductRow({
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 truncate text-[11.5px] text-muted">{f.stageLabel}</p>
+              <p className="mt-0.5 truncate text-[11.5px] text-muted">{itemLabel(p) ? `${itemLabel(p)} · ` : ""}{f.stageLabel}</p>
             </div>
           </div>
         </td>
@@ -496,6 +523,29 @@ function ProductRow({
           <span className="figure text-[13px] font-semibold text-ink">
             {p.working.moq > 0 ? p.working.moq.toLocaleString() : "—"}
           </span>
+        </td>
+
+        {/* Paid / balance — the advance against this product's own order total,
+            in its own currency (products are priced in USD, INR or CNY). */}
+        <td className="px-3 py-3 text-right">
+          {(() => {
+            const total = p.working.rateValue ?? 0;
+            if (total <= 0) return <span className="text-[13px] text-muted">—</span>;
+            const sym = CUR_SYM[p.working.rateCurrency ?? "INR"] ?? "$";
+            const paid = Math.min(p.working.advancePaid ?? 0, total);
+            const pending = Math.max(total - paid, 0);
+            return (
+              <div className="leading-tight">
+                <span className="figure block text-[13px] font-semibold text-go">
+                  {sym}
+                  {Math.round(paid).toLocaleString()}
+                </span>
+                <span className={clsx("figure block text-[11px]", pending > 0 ? "text-pending" : "text-muted")}>
+                  {pending > 0 ? `${sym}${Math.round(pending).toLocaleString()} due` : "settled"}
+                </span>
+              </div>
+            );
+          })()}
         </td>
 
         {/* Status */}
@@ -563,7 +613,7 @@ function ProductRow({
       {/* Expanded detail row (spans all 8 columns) */}
       {open && (
         <tr className="bg-surface">
-          <td colSpan={8} className="p-0">
+          <td colSpan={9} className="p-0">
             <AnimatePresence initial={false}>
               <motion.div
                 initial={reduce ? false : { height: 0, opacity: 0 }}

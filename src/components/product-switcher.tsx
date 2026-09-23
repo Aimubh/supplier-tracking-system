@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Plus, ChevronDown, Package, Trash2, CheckCircle2 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useStore, itemLabel } from "@/lib/store";
 
 // Pick or create the product you're working on. Everything in the working tabs
 // attaches to this active product, so one product flows through the whole pipeline.
@@ -130,7 +130,7 @@ export function ProductSwitcher() {
                     <span className="block truncate text-[13px] font-medium text-ink">
                       {p.name || "Untitled product"}
                     </span>
-                    <span className="eyebrow">{p.category || "uncategorised"}</span>
+                    <span className="eyebrow">{itemLabel(p) || p.category || "uncategorised"}</span>
                   </button>
                   <button
                     onClick={() => removeProduct(p.id)}

@@ -18,19 +18,25 @@ import {
   X,
   FileDown,
   RefreshCw,
+  Search,
 } from "lucide-react";
-import { useStore, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
-import { computeOrderSummary, expenseCurrency, paymentCurrency, expensesIn } from "@/lib/order-summary";
+import { useStore, itemLabel, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
+import { computeOrderSummary, convertPayment, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
-import { useFxRates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
+import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item } from "./motion";
 
 const CURRENCIES: CurrencyCode[] = ["INR", "USD", "CNY"];
 
-function downloadBill(p: Product, show: CurrencyCode, rates: Record<string, number> | null) {
+function downloadBill(
+  p: Product,
+  show: CurrencyCode,
+  rates: Record<string, number> | null,
+  ratesByDate: Record<string, Record<string, number> | null>
+) {
   const date = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  openOrderBill(p, date, show, rates);
+  openOrderBill(p, date, show, rates, ratesByDate);
 }
 
 function fmtMoney(sym: string, n: number) {
@@ -50,15 +56,32 @@ export function OrderSummaryView() {
   // computeOrderSummary normalises every per-field currency into each product's
   // own product currency using live rates; toDisp then converts that base into
   // the chosen display currency.
-  const rows = products.map((p) => ({ p, s: computeOrderSummary(p, fx.rates) }));
+  // Each product's payments are valued at the rate on their own date.
+  const [query, setQuery] = useState("");
+  const ratesByDate = useRatesForDates(products.flatMap(valuationDates));
+  const allRows = products.map((p) => ({ p, s: computeOrderSummary(p, fx.rates, ratesByDate) }));
+  // Search across the fields you'd actually look a product up by. Totals below
+  // are computed from the filtered rows, so they answer "what does this
+  // supplier owe me" rather than always showing the whole book.
+  const q = query.trim().toLowerCase();
+  const rows = q
+    ? allRows.filter(({ p }) =>
+        `${p.name} ${p.category} ${p.supplier?.name ?? ""} ${p.po?.poNumber ?? ""} ${p.sourcing?.inputs?.itemName ?? ""}`
+          .toLowerCase()
+          .includes(q)
+      )
+    : allRows;
 
   // Portfolio totals — converted to the display currency per product source.
   const tot = rows.reduce(
     (a, { p, s }) => {
       const prodCur = p.working.rateCurrency ?? "INR";
-      a.goods += toDisp(s.goodsTotal, prodCur);
-      a.expenses += toDisp(s.expensesTotal, prodCur); // expenses entered in product currency
-      a.final += toDisp(s.finalExpense, prodCur);
+      // Goods at the rate actually paid; expenses at today's (they're INR anyway).
+      const goods = convertPayment(p, s.goodsTotal, "rateValue", prodCur, show, fx.rates, ratesByDate);
+      const expenses = toDisp(s.expensesTotal, prodCur); // expenses entered in product currency
+      a.goods += goods;
+      a.expenses += expenses;
+      a.final += goods + expenses;
       a.selling += toDisp(s.sellingTotal, prodCur);
       a.profit += toDisp(s.profit, prodCur);
       return a;
@@ -91,6 +114,32 @@ export function OrderSummaryView() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search across product, supplier, category and invoice number */}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search product, supplier, invoice…"
+              className="h-9 w-[280px] rounded-sm border border-line bg-white pl-9 pr-8 text-[13px] text-ink placeholder:text-muted focus:border-link focus:outline-none focus:ring-2 focus:ring-link/15"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted transition hover:text-ink"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {query && (
+            <span className="text-[12px] text-muted">
+              {rows.length} of {allRows.length}
+            </span>
+          )}
+
         {/* Currency conversion filter */}
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-medium text-muted">Show in</span>
@@ -111,6 +160,7 @@ export function OrderSummaryView() {
           >
             <RefreshCw className={clsx("h-4 w-4", fx.loading && "animate-spin")} />
           </button>
+        </div>
         </div>
       </div>
 
@@ -139,13 +189,15 @@ export function OrderSummaryView() {
             <span className="text-[11px] text-muted">All figures in {show}</span>
           </div>
 
-          {products.length === 0 ? (
+          {rows.length === 0 ? (
             <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-ink text-white">
                 <PackageOpen className="h-6 w-6" />
               </div>
               <p className="max-w-sm text-[14px] text-muted">
-                No products yet. Once a product is in the pipeline, its financial summary appears here.
+                {q
+                  ? `No product matches "${query.trim()}". Try a supplier name or invoice number.`
+                  : "No products yet. Once a product is in the pipeline, its financial summary appears here."}
               </p>
             </div>
           ) : (
@@ -167,11 +219,15 @@ export function OrderSummaryView() {
                   {rows.map(({ p, s }) => {
                     const prodCur = p.working.rateCurrency ?? "INR";
                     const c = (n: number) => toDisp(n, prodCur);
+                    const cPay = (n: number, field: "rateValue" | "advancePaid") =>
+                      convertPayment(p, n, field, prodCur, show, fx.rates, ratesByDate);
+                    const order = cPay(s.goodsTotal, "rateValue");
                     const profit = c(s.profit);
                     return (
                       <SummaryRow
                         key={p.id}
                         p={p}
+                        ratesByDate={ratesByDate}
                         open={openId === p.id}
                         onToggle={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
                         dispSym={dispSym}
@@ -180,10 +236,10 @@ export function OrderSummaryView() {
                         toDisp={toDisp}
                         cells={{
                           qty: s.totalQty,
-                          order: c(s.goodsTotal),
-                          paid: c(s.advancePaid),
+                          order,
+                          paid: cPay(s.advancePaid, "advancePaid"),
                           expenses: c(s.expensesTotal),
-                          final: c(s.finalExpense),
+                          final: order + c(s.expensesTotal),
                           profit,
                           profitable: s.profitable,
                         }}
@@ -207,6 +263,7 @@ function SummaryRow({
   dispSym,
   show,
   rates,
+  ratesByDate,
   toDisp,
   cells,
 }: {
@@ -216,6 +273,7 @@ function SummaryRow({
   dispSym: string;
   show: CurrencyCode;
   rates: Record<string, number> | null;
+  ratesByDate: Record<string, Record<string, number> | null>;
   toDisp: (n: number, from: CurrencyCode) => number;
   cells: { qty: number; order: number; paid: number; expenses: number; final: number; profit: number; profitable: boolean | null };
 }) {
@@ -230,7 +288,7 @@ function SummaryRow({
         </td>
         <td className="px-3 py-3">
           <span className="text-[14px] font-medium text-ink">{p.name}</span>
-          <p className="text-[11.5px] text-muted">{p.category || "—"} · {p.working.rate}</p>
+          <p className="text-[11.5px] text-muted">{itemLabel(p) || p.category || "—"} · {p.working.rate}</p>
         </td>
         <td className="px-3 py-3 text-right figure text-[13px] text-ink">{cells.qty > 0 ? cells.qty.toLocaleString() : "—"}</td>
         <td className="px-3 py-3 text-right figure text-[13px] text-ink">{cells.order > 0 ? fmtMoney(dispSym, cells.order) : "—"}</td>
@@ -248,7 +306,7 @@ function SummaryRow({
               </span>
             )}
             <button
-              onClick={(ev) => { ev.stopPropagation(); downloadBill(p, show, rates); }}
+              onClick={(ev) => { ev.stopPropagation(); downloadBill(p, show, rates, ratesByDate); }}
               title="Download order bill (PDF)"
               className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[12px] font-medium text-ink transition hover:bg-surface"
             >
@@ -261,7 +319,8 @@ function SummaryRow({
       {open && (
         <tr className="bg-surface">
           <td colSpan={8} className="p-0">
-            <PnlSheet p={p} show={show} dispSym={dispSym} rates={rates} toDisp={toDisp} />
+            <PnlSheet p={p} show={show} dispSym={dispSym} rates={rates}
+              ratesByDate={ratesByDate} toDisp={toDisp} />
           </td>
         </tr>
       )}
@@ -277,12 +336,14 @@ function PnlSheet({
   show,
   dispSym,
   rates,
+  ratesByDate,
   toDisp,
 }: {
   p: Product;
   show: CurrencyCode;
   dispSym: string;
   rates: Record<string, number> | null;
+  ratesByDate: Record<string, Record<string, number> | null>;
   toDisp: (n: number, from: CurrencyCode) => number;
 }) {
   const { patchProduct } = useStore();
@@ -299,6 +360,13 @@ function PnlSheet({
   const setLogistics = <K extends keyof Logistics>(key: K, value: Logistics[K]) =>
     patchProduct(p.id, "logistics", { ...l, [key]: value });
 
+  // Pieces per unit (set/pack) — a set-of-5 pouch listing has packUnits=5, so a
+  // ₹53 "per unit" price is really ₹10.60 per piece. Lives on sourcing.inputs
+  // (packUnits already existed there, unused by any view until now).
+  const packUnits = p.sourcing?.inputs?.packUnits || 1;
+  const setPackUnits = (v: number) =>
+    patchProduct(p.id, "sourcing", { ...p.sourcing, inputs: { ...p.sourcing.inputs, packUnits: v || 1 } });
+
   // Per-field currency: resolve and update. Overrides live in expenses.fieldCurrency
   // / working.paymentCurrency; clearing one back to the section currency just drops
   // the key. Each setter writes a fresh map so the store auto-save fires.
@@ -311,15 +379,21 @@ function PnlSheet({
 
   // Derived figures in the display currency — each amount converted from its own
   // resolved currency.
-  const goodsTotal = toDisp(w.rateValue || 0, payCur("rateValue"));
-  const prodAdv = toDisp(Math.min(w.advancePaid || 0, w.rateValue || 0), payCur("advancePaid"));
-  const shipAdv = toDisp(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), payCur("shipmentAdvance"));
+  // Payments are valued at the rate they were actually settled at, same as the bill.
+  const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") =>
+    convertPayment(p, n, field, payCur(field), show, rates, ratesByDate);
+  const goodsTotal = cPay(w.rateValue || 0, "rateValue");
+  const prodAdv = cPay(Math.min(w.advancePaid || 0, w.rateValue || 0), "advancePaid");
+  const shipAdv = cPay(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), "shipmentAdvance");
   const freightFields: ExpenseMoneyField[] = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge"];
   const otherFields: ExpenseMoneyField[] = ["dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
   // Total expenses in the display currency — convert each field from its own currency.
   const expensesDisp = expensesIn(p, show, rates);
   const finalDisp = goodsTotal + expensesDisp;
   const perUnit = (w.moq || 0) > 0 ? finalDisp / (w.moq as number) : 0;
+  // Per piece = per unit split across the pieces in each unit (set/pack). Only
+  // meaningfully different from "per unit" when packUnits > 1 (a set of 5, say).
+  const perPiece = packUnits > 1 ? perUnit / packUnits : perUnit;
   const arrived = !!l.handedToInventory;
   const outstanding = Math.max(finalDisp - (prodAdv + shipAdv), 0);
 
@@ -328,7 +402,7 @@ function PnlSheet({
   const COST_LABELS: Record<string, string> = {
     oceanFreight: "Ocean freight", doCharge: "DO charge", thcCharge: "THC (terminal handling)",
     cfsCharge: "CFS (freight station)", wgmtCharge: "WGMT (weighment)", gstCharge: "GST on charges",
-    dutyActual: "Customs duty + IGST", chaCharges: "CHA charges", lastMileCost: "Last-mile (extra)",
+    dutyActual: "Customs duty (BCD + SWS)", chaCharges: "CHA charges", lastMileCost: "Last-mile (extra)",
     otherExpense: "Other", indiaTransport: "Port-to-warehouse transport",
   };
   const costLines: { label: string; amount: number }[] = [
@@ -345,7 +419,7 @@ function PnlSheet({
     gstCharge: { label: "GST", hint: "on destination charges" },
   };
   const OTHER_META: Record<string, { label: string; hint: string }> = {
-    dutyActual: { label: "Duty + IGST", hint: "customs duty & taxes" },
+    dutyActual: { label: "Customs duty", hint: "BCD + SWS — IGST excluded (input credit)" },
     chaCharges: { label: "CHA charges", hint: "clearing agent fees" },
     lastMileCost: { label: "Last-mile (extra)", hint: "adds to India transport" },
     otherExpense: { label: "Other", hint: "inspection, insurance…" },
@@ -364,6 +438,7 @@ function PnlSheet({
             <p className="eyebrow mb-3">Order</p>
             <div className="grid grid-cols-2 gap-3">
               <FieldNum label="Quantity (MOQ)" value={w.moq} onChange={(v) => setWorking("moq", v)} />
+              <FieldNum label="Pieces / unit" value={packUnits} onChange={setPackUnits} />
               <FieldSelect label="Rate term" value={w.rate} options={["FOB", "CIF", "EXW", "FCA"]} onChange={(v) => setWorking("rate", v as Working["rate"])} />
               <FieldDate label="Start date" value={w.productionStart} onChange={(v) => setWorking("productionStart", v)} />
               <FieldDate label="End date (out-of-charge)" value={l.outOfChargeDate} onChange={(v) => setLogistics("outOfChargeDate", v)} />
@@ -453,7 +528,9 @@ function PnlSheet({
               <div className="border-t border-line pt-2">
                 <Line label="= Total landed cost" value={fmtMoney(dispSym, finalDisp)} bold />
                 <p className="mt-0.5 text-right text-[11px] text-muted">
-                  {(w.moq || 0) > 0 ? `${fmtMoney(dispSym, perUnit)} / unit · ` : ""}factory → our warehouse, all-in
+                  {(w.moq || 0) > 0 ? `${fmtMoney(dispSym, perUnit)} / unit` : ""}
+                  {(w.moq || 0) > 0 && packUnits > 1 ? ` (${fmtMoney(dispSym, perPiece)} / piece)` : ""}
+                  {(w.moq || 0) > 0 ? " · " : ""}factory → our warehouse, all-in
                 </p>
               </div>
 
@@ -465,7 +542,7 @@ function PnlSheet({
               )}
             </dl>
             <button
-              onClick={() => downloadBill(p, show, rates)}
+              onClick={() => downloadBill(p, show, rates, ratesByDate)}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-[14px] font-medium text-white transition hover:bg-brand-600"
             >
               <FileDown className="h-4 w-4" /> Download order bill (PDF)

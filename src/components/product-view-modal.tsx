@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { useStore, type MediaItem, type CurrencyCode } from "@/lib/store";
+import { useStore, itemLabel, type MediaItem, type CurrencyCode } from "@/lib/store";
 import { computeSourcing } from "@/lib/sourcing-model";
 import { getFlow, type PhaseKey } from "@/lib/flow";
 import { motion, AnimatePresence, useReducedMotion } from "./motion";
@@ -306,7 +306,7 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
                 {f.percent === 100 && <CheckCircle2 className="h-5 w-5 shrink-0 text-go" />}
               </div>
               <p className="mt-0.5 text-[13px] text-muted">
-                {dash(p.category)} · {f.stageLabel} · {f.doneCount}/{f.total} steps
+                {itemLabel(p) ? `${itemLabel(p)} · ` : ""}{dash(p.category)} · {f.stageLabel} · {f.doneCount}/{f.total} steps
               </p>
             </div>
 
