@@ -43,6 +43,11 @@ function fmtMoney(sym: string, n: number) {
   return `${sym}${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+// Unit prices always carry two decimals — "₹88.90", not "₹88.9".
+function fmtUnit(sym: string, n: number) {
+  return `${sym}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function OrderSummaryView() {
   const { products } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -202,7 +207,7 @@ export function OrderSummaryView() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] border-collapse text-left">
+              <table className="w-full min-w-[1000px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-line bg-surface">
                     <th className="w-8 px-3 py-2.5" />
@@ -212,6 +217,7 @@ export function OrderSummaryView() {
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Paid</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Expenses</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Final cost</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Per unit</th>
                     <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-muted">Profit / loss</th>
                   </tr>
                 </thead>
@@ -240,6 +246,8 @@ export function OrderSummaryView() {
                           paid: cPay(s.advancePaid, "advancePaid"),
                           expenses: c(s.expensesTotal),
                           final: order + c(s.expensesTotal),
+                          // Same maths as the bill: landed cost / order quantity.
+                          perUnit: s.totalQty > 0 ? (order + c(s.expensesTotal)) / s.totalQty : 0,
                           profit,
                           profitable: s.profitable,
                         }}
@@ -275,7 +283,7 @@ function SummaryRow({
   rates: Record<string, number> | null;
   ratesByDate: Record<string, Record<string, number> | null>;
   toDisp: (n: number, from: CurrencyCode) => number;
-  cells: { qty: number; order: number; paid: number; expenses: number; final: number; profit: number; profitable: boolean | null };
+  cells: { qty: number; order: number; paid: number; expenses: number; final: number; perUnit: number; profit: number; profitable: boolean | null };
 }) {
   return (
     <>
@@ -295,6 +303,21 @@ function SummaryRow({
         <td className="px-3 py-3 text-right figure text-[13px] text-go">{cells.paid > 0 ? fmtMoney(dispSym, cells.paid) : "—"}</td>
         <td className="px-3 py-3 text-right figure text-[13px] text-body">{cells.expenses > 0 ? fmtMoney(dispSym, cells.expenses) : "—"}</td>
         <td className="px-3 py-3 text-right figure text-[13px] font-semibold text-ink">{cells.final > 0 ? fmtMoney(dispSym, cells.final) : "—"}</td>
+        <td className="px-3 py-3 text-right">
+          {cells.perUnit > 0 ? (
+            <>
+              <span className="figure block text-[13px] font-semibold text-ink">{fmtUnit(dispSym, cells.perUnit)}</span>
+              {/* Sets / packs: also show the price of one piece inside the unit. */}
+              {(p.sourcing?.inputs?.packUnits || 1) > 1 && (
+                <span className="figure block text-[11px] text-muted">
+                  {fmtUnit(dispSym, cells.perUnit / (p.sourcing.inputs.packUnits || 1))} / pc
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-[13px] text-muted">—</span>
+          )}
+        </td>
         <td className="px-3 py-3 text-right">
           <div className="flex items-center justify-end gap-3">
             {cells.profitable === null ? (
@@ -318,7 +341,7 @@ function SummaryRow({
 
       {open && (
         <tr className="bg-surface">
-          <td colSpan={8} className="p-0">
+          <td colSpan={9} className="p-0">
             <PnlSheet p={p} show={show} dispSym={dispSym} rates={rates}
               ratesByDate={ratesByDate} toDisp={toDisp} />
           </td>

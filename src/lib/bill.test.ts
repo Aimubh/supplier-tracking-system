@@ -68,3 +68,17 @@ assert.ok(bill.includes("packUnits > 1 ? dPerUnit / packUnits"), "per-piece must
 assert.ok(/Per piece/.test(bill), "bill needs a Per piece line for multi-piece units");
 
 console.log("bill: per-piece line derives from per-unit — all checks passed");
+
+// Goods are valued instalment by instalment, each at its own day's rate. A
+// single order-date rate for the whole amount mis-prices any balance paid on a
+// different day, and the bill's own Payments table would then disagree with it.
+assert.ok(summary.includes("function instalmentValue("), "goods must be blended per instalment");
+assert.ok(/ratesByDate\[x\.paidDate\]/.test(summary), "each instalment must use the rate on its own paid date");
+assert.ok(summary.includes("x.fxRate ?"), "a recorded bank rate must win over the market rate");
+
+// The Order Summary table carries a Per unit column.
+const view = readFileSync(new URL("../components/order-summary-view.tsx", import.meta.url), "utf8");
+assert.ok(/>Per unit<\/th>/.test(view), "Order Summary needs a Per unit column");
+assert.ok(view.includes("colSpan={9}"), "the expanded sheet must span the new column");
+
+console.log("order summary: per-unit column + per-instalment rates — all checks passed");

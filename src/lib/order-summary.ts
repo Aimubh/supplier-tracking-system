@@ -77,9 +77,42 @@ export function convertPayment(
   rates: Rates | null,
   ratesByDate: Record<string, Rates | null> = {}
 ): number {
+  // Goods: every instalment at its OWN rate — the bank rate when recorded,
+  // else the market rate on the day it was paid — blended by amount. Valuing
+  // the whole order at the deposit-day rate mis-prices any balance paid on a
+  // different day (fstool: $5,846 paid 20-Jun at 94.33, not 27-May's 95.69).
+  if (field === "rateValue" || field === "advancePaid") {
+    const blended = instalmentValue(p, from, to, ratesByDate);
+    if (blended !== null) return n * blended;
+  }
   const actual = paymentFxTable(p, field);
   if (actual && actual[from] && actual[to]) return convert(n, from, to, actual);
   return convertAsOf(n, from, to, paymentDate(p, field), ratesByDate, rates);
+}
+
+// Value of one unit of `from` across the PAID goods instalments, each converted
+// at its own rate. Null when there is nothing to blend or a dated table hasn't
+// loaded yet (the caller falls back, and the view re-renders once it arrives).
+function instalmentValue(
+  p: Product,
+  from: CurrencyCode,
+  to: CurrencyCode,
+  ratesByDate: Record<string, Rates | null>
+): number | null {
+  const paid = (p.payments ?? []).filter(
+    (x) => x.status === "PAID" && (x.amount || 0) > 0 && x.type !== "FREIGHT" && x.type !== "DUTY" && x.type !== "CHA"
+  );
+  const total = paid.reduce((a, x) => a + x.amount, 0);
+  if (total <= 0) return null;
+  let value = 0;
+  for (const x of paid) {
+    if ((x.currency || from) !== from) return null; // mixed currencies: don't guess
+    const bank: Rates | null = x.fxRate ? { USD: 1, INR: x.fxRate } : null;
+    const table = bank && bank[from] && bank[to] ? bank : x.paidDate ? ratesByDate[x.paidDate] : null;
+    if (from !== to && !(table && table[from] && table[to])) return null;
+    value += convert(x.amount, from, to, table);
+  }
+  return value / total;
 }
 
 // Every date this product needs a historical rate for, so a view can preload them.
