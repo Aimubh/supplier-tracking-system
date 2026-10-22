@@ -26,6 +26,12 @@ function stripMediaArray(v: unknown): unknown {
   });
 }
 
+// Same, for a map of media arrays (logistics.docImages: { docBoE: [...], ... }).
+function stripMediaMap(v: unknown): unknown {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return stripMediaArray(v);
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, arr]) => [k, stripMediaArray(arr)]));
+}
+
 // Produce a LIGHT version of a product: every base64-bearing field is emptied
 // (no thumbnails embedded either — those are full-size and would defeat the
 // purpose). All the SCALAR fields the list views need (name, category, money,
@@ -44,7 +50,11 @@ function toLight(p: Record<string, unknown>): Record<string, unknown> {
   working.sampleImage = "";
 
   const logistics = { ...(p.logistics as Record<string, unknown> | null ?? {}) };
-  logistics.docImages = stripMediaArray(logistics.docImages);
+  // docImages is a MAP of checklist key -> files (not an array), so each slot is
+  // stripped on its own. Passing the map straight to stripMediaArray returned it
+  // untouched, shipping every uploaded PDF in the list on every page load — and
+  // past Vercel's 4.5 MB response cap the whole product list fails to load.
+  logistics.docImages = stripMediaMap(logistics.docImages);
 
   return {
     ...p,
