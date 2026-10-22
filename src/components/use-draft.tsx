@@ -9,13 +9,25 @@ export function useDraft<T>(source: T, sourceKey: string) {
   const [draft, setDraft] = useState<T>(source);
   const [saved, setSaved] = useState(false);
   const keyRef = useRef(sourceKey);
+  const sourceRef = useRef(source);
 
   // Re-seed the draft when the underlying product/slice changes (product switch).
   useEffect(() => {
     if (keyRef.current !== sourceKey) {
       keyRef.current = sourceKey;
+      sourceRef.current = source;
       setDraft(source);
       setSaved(false);
+      return;
+    }
+    // Same product, new data underneath — typically the full record (with its
+    // photos and documents) finishing its load after the form opened. Adopt it
+    // while the user hasn't edited anything, so the form never sits on the
+    // light copy's blank file placeholders or shows a false "Unsaved changes".
+    if (source !== sourceRef.current) {
+      const before = JSON.stringify(sourceRef.current);
+      sourceRef.current = source;
+      setDraft((d) => (JSON.stringify(d) === before ? source : d));
     }
   }, [sourceKey, source]);
 

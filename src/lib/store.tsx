@@ -21,6 +21,7 @@ import {
   type SourcingInputs,
 } from "./sourcing-model";
 import { EMPTY_MARKET_SIZE, type MarketSize } from "./market-size";
+import { refillStrippedMedia } from "./media-refill";
 
 // ---- Entity types -------------------------------------------------------------
 
@@ -1063,7 +1064,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setProducts((prev) =>
         prev.map((p) => {
           if (p.id !== activeId) return p;
-          const next = { ...p, [key]: value };
+          // A form seeded from the light list holds blank file placeholders;
+          // put the real bytes back before anything is saved.
+          const next = refillStrippedMedia({ ...p, [key]: value } as Product, p);
           // Don't autosave while media is still stripped (_light) — that would
           // persist empty media. ensureFull() (triggered on open) fills it first.
           if (p._light) {
@@ -1086,8 +1089,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setProducts((prev) =>
         prev.map((p) => {
           if (p.id !== id) return p;
-          const next = { ...p, [key]: value };
+          const next = refillStrippedMedia({ ...p, [key]: value } as Product, p);
           if (p._light) {
+            // Park it like patch() does — without this the edit was never saved.
+            pendingSave.current.add(p.id);
             void ensureFull(p.id); // load full media before any save
           } else {
             saveProductDebounced(`/api/products/${p.id}`, stripRuntimeFlags(next));
