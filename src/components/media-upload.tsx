@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { UploadCloud, X, FileText, Play } from "lucide-react";
 import type { MediaItem } from "@/lib/store";
 import { convertHeic } from "@/lib/heic";
+import { openFile } from "@/lib/open-file";
 
 // Multi-file uploader for photos, videos and PDFs. Each file is read to a
 // base64 data URL and added to the gallery, so several can be attached to one
@@ -134,16 +135,15 @@ function Thumb({ item, onRemove }: { item: MediaItem; onRemove: () => void }) {
           </span>
         </>
       ) : (
-        <a
-          href={item.data}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => openFile(item.data)}
           className="flex h-full w-full flex-col items-center justify-center gap-1 text-coral"
           title={item.fileName}
         >
           <FileText className="h-6 w-6" />
           <span className="px-1 text-center text-[9px] text-muted line-clamp-2">{item.fileName}</span>
-        </a>
+        </button>
       )}
 
       <button

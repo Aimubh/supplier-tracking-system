@@ -4,6 +4,7 @@
 // product's photos + videos and formatted details, branded with the Lazer logo.
 
 import { useEffect, useState } from "react";
+import { openFile } from "@/lib/open-file";
 
 interface Media { kind: string; fileType: string; fileName: string; data: string }
 interface ProductView {
@@ -60,10 +61,10 @@ export default function QrProductPage({ params }: { params: { id: string } }) {
                   m.kind === "video" ? (
                     <video key={i} src={m.data} controls style={{ width: "100%", borderRadius: 10, background: "#000", aspectRatio: "1", objectFit: "cover" }} />
                   ) : m.kind === "pdf" ? (
-                    <a key={i} href={m.data} target="_blank" rel="noreferrer"
-                       style={{ display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1", borderRadius: 10, background: "#fff", border: "1px solid #dad5c7", color: "#15130e", textDecoration: "none", fontSize: 13, textAlign: "center", padding: 8 }}>
+                    <button key={i} type="button" onClick={() => openFile(m.data)}
+                       style={{ display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1", borderRadius: 10, background: "#fff", border: "1px solid #dad5c7", color: "#15130e", textDecoration: "none", fontSize: 13, textAlign: "center", padding: 8, cursor: "pointer" }}>
                       📄 {m.fileName || "PDF"}
-                    </a>
+                    </button>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img key={i} src={m.data} alt={m.fileName || "photo"} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, border: "1px solid #dad5c7" }} />

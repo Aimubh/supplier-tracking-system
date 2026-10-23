@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Check, FileText, Upload, X, Eye, Play } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { MediaItem } from "@/lib/store";
+import { openFile } from "@/lib/open-file";
 
 // A document line: collected toggle + multi-file upload (images / videos / PDFs)
 // that auto-ticks once any file is attached. Thumbnails sit inline; images open
@@ -179,13 +180,13 @@ function DocThumb({
           </span>
         </button>
       ) : item.kind === "video" ? (
-        <a href={item.data} target="_blank" rel="noreferrer" className="flex h-full w-full items-center justify-center bg-ink text-white" title={item.fileName}>
+        <button type="button" onClick={() => openFile(item.data)} className="flex h-full w-full items-center justify-center bg-ink text-white" title={item.fileName}>
           <Play className="h-3.5 w-3.5" fill="currentColor" />
-        </a>
+        </button>
       ) : (
-        <a href={item.data} target="_blank" rel="noreferrer" className="flex h-full w-full items-center justify-center bg-surface text-coral" title={item.fileName}>
+        <button type="button" onClick={() => openFile(item.data)} className="flex h-full w-full items-center justify-center bg-surface text-coral" title={item.fileName}>
           <FileText className="h-4 w-4" />
-        </a>
+        </button>
       )}
       <button
         onClick={onRemove}

@@ -15,6 +15,7 @@ import { useStore, itemLabel, type MediaItem, type CurrencyCode } from "@/lib/st
 import { computeSourcing } from "@/lib/sourcing-model";
 import { getFlow, type PhaseKey } from "@/lib/flow";
 import { motion, AnimatePresence, useReducedMotion } from "./motion";
+import { openFile } from "@/lib/open-file";
 import {
   X,
   Boxes,
@@ -557,22 +558,21 @@ function MediaThumb({ item }: { item: MediaItem }) {
   }
   if (item.kind === "pdf") {
     return (
-      <a
-        href={item.data}
-        target="_blank"
-        rel="noreferrer"
+      <button
+        type="button"
+        onClick={() => openFile(item.data)}
         title={item.fileName}
         className="flex aspect-square flex-col items-center justify-center gap-1 rounded-md border border-line bg-surface text-coral transition hover:bg-white"
       >
         <FileText className="h-6 w-6" />
         <span className="px-1 text-center text-[9px] text-muted line-clamp-2">{item.fileName}</span>
-      </a>
+      </button>
     );
   }
   return (
-    <a href={item.data} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-md border border-line">
+    <button type="button" onClick={() => openFile(item.data)} className="block aspect-square w-full overflow-hidden rounded-md border border-line">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={item.data} alt={item.fileName} className="h-full w-full object-cover" />
-    </a>
+    </button>
   );
 }

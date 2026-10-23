@@ -40,6 +40,15 @@ const DOCS: { key: keyof Logistics; label: string; critical?: boolean }[] = [
   { key: "inspectionCert", label: "Inspection / Test certificate" },
 ];
 
+// These Dispatch rows are the same documents as rows on Custom Clearance. They
+// share one set of files, so an invoice uploaded on either step shows on both.
+const SAME_FILES_AS: Partial<Record<keyof Logistics, keyof Logistics>> = {
+  ciCollected: "docInvoice",
+  packingListCollected: "docPackingList",
+  cooCollected: "docCoo",
+  insurance: "docInsurance",
+};
+
 export function DispatchDocsPanel() {
   const { active, patch, uid, draft, setField, dirty, saved, flashSaved, discard } = useLogisticsDraft();
   if (!active) return null;
@@ -51,7 +60,9 @@ export function DispatchDocsPanel() {
     setField("docImages", next);
   };
   const moveDone = MOVEMENT.filter((m) => l[m.key]).length;
-  const docDone = DOCS.filter((d) => (d.key === "blNumber" ? !!l.blNumber : l[d.key])).length;
+  const docDone = DOCS.filter((d) =>
+    d.key === "blNumber" ? !!l.blNumber : !!l[d.key] || (l.docImages?.[SAME_FILES_AS[d.key] ?? d.key]?.length ?? 0) > 0
+  ).length;
 
   return (
     <div>
@@ -126,11 +137,18 @@ export function DispatchDocsPanel() {
           <div className="space-y-1.5">
             {DOCS.map((d) => {
               const isBL = d.key === "blNumber";
-              const on = isBL ? !!l.blNumber : !!l[d.key];
+              const twin = SAME_FILES_AS[d.key];
+              const slot = twin ?? d.key;
+              const files = l.docImages?.[slot] ?? [];
+              const on = isBL ? !!l.blNumber : !!l[d.key] || files.length > 0;
               return (
                 <DocRow key={d.key} label={d.label} critical={d.critical} collected={on}
-                  items={l.docImages?.[d.key] ?? []} uid={uid} toggleLocked={isBL}
-                  onChange={(items) => { setDocFiles(d.key, items); if (!isBL) setField(d.key, (items.length > 0) as never); }}
+                  items={files} uid={uid} toggleLocked={isBL}
+                  onChange={(items) => {
+                    setDocFiles(slot, items);
+                    if (!isBL) setField(d.key, (items.length > 0) as never);
+                    if (twin) setField(twin, (items.length > 0) as never); // keep the Clearance tick in step
+                  }}
                 />
               );
             })}
