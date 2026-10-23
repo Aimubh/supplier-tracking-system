@@ -17,3 +17,9 @@ const fn = route.slice(route.indexOf("function stripMediaMap"), route.indexOf("f
 assert.ok(fn.includes("Object.entries") && fn.includes("stripMediaArray(arr)"), "each slot must be stripped");
 
 console.log("light-list: documents stripped from the product list — all checks passed");
+
+// Whatever product becomes active must load its full record (files included),
+// not only one picked in the switcher — or its file icons open nothing.
+const store = readFileSync(new URL("./store.tsx", import.meta.url), "utf8");
+assert.ok(/if \(activeId && activeIsLight\) void ensureFull\(activeId\)/.test(store), "the active product must always load its files");
+console.log("light-list: the active product always loads its files — all checks passed");

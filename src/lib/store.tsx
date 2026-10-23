@@ -1135,6 +1135,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [products, activeId]
   );
 
+  // The active product must always be the full record. Only the switcher used
+  // to load it; the product picked automatically on page load (and any other
+  // route that sets the active id) stayed light, so its screens showed photo
+  // and document icons with no bytes behind them, and clicking did nothing.
+  const activeIsLight = !!active?._light;
+  useEffect(() => {
+    if (activeId && activeIsLight) void ensureFull(activeId);
+  }, [activeId, activeIsLight, ensureFull]);
+
   const value: StoreShape = {
     products,
     loadFailed,
