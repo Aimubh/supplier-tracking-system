@@ -211,12 +211,7 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
       checklist: [
         { label: "Commercial invoice", on: L.ciCollected },
         { label: "Packing list", on: L.packingListCollected },
-        { label: "Certificate of origin", on: L.cooCollected },
-        { label: "Shipping bill", on: L.shippingBill },
         { label: "LC / payment proof", on: L.lcPayment },
-        { label: "Marine insurance", on: L.insurance },
-        { label: "Fumigation / phyto", on: L.fumigation },
-        { label: "Inspection certificate", on: L.inspectionCert },
       ],
     },
     {

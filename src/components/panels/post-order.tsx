@@ -32,12 +32,7 @@ const DOCS: { key: keyof Logistics; label: string; critical?: boolean }[] = [
   { key: "ciCollected", label: "Commercial Invoice (CI)" },
   { key: "packingListCollected", label: "Packing List" },
   { key: "blNumber", label: "Bill of Lading (B/L)", critical: true },
-  { key: "cooCollected", label: "Certificate of Origin (COO)" },
-  { key: "shippingBill", label: "Shipping Bill / Export declaration" },
   { key: "lcPayment", label: "Letter of Credit / payment proof" },
-  { key: "insurance", label: "Marine Insurance certificate" },
-  { key: "fumigation", label: "Fumigation / Phytosanitary certificate" },
-  { key: "inspectionCert", label: "Inspection / Test certificate" },
 ];
 
 // These Dispatch rows are the same documents as rows on Custom Clearance. They
@@ -45,8 +40,6 @@ const DOCS: { key: keyof Logistics; label: string; critical?: boolean }[] = [
 const SAME_FILES_AS: Partial<Record<keyof Logistics, keyof Logistics>> = {
   ciCollected: "docInvoice",
   packingListCollected: "docPackingList",
-  cooCollected: "docCoo",
-  insurance: "docInsurance",
 };
 
 export function DispatchDocsPanel() {
@@ -186,11 +179,6 @@ const CLEARANCE_DOCS: { key: keyof Logistics; label: string; critical?: boolean 
   { key: "docDO", label: "Delivery Order (from line/agent)" },
   { key: "docInvoice", label: "Commercial Invoice" },
   { key: "docPackingList", label: "Packing List" },
-  { key: "docCoo", label: "Certificate of Origin (duty benefit)" },
-  { key: "docLicence", label: "Import licence / BIS certificate (if applicable)" },
-  { key: "docInsurance", label: "Insurance certificate" },
-  { key: "docIec", label: "IEC (Import-Export Code) on file" },
-  { key: "docTechWriteup", label: "Technical write-up / catalog (if asked)" },
 ];
 
 export function CustomClearancePanel() {
