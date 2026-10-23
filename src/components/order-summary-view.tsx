@@ -21,8 +21,9 @@ import {
   Search,
 } from "lucide-react";
 import { useStore, itemLabel, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
-import { computeOrderSummary, convertPayment, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
+import { computeOrderSummary, convertPayment, goodsPaid, goodsPayments, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
+import { PaymentsEditor } from "./payments-editor";
 import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item } from "./motion";
@@ -406,7 +407,7 @@ function PnlSheet({
   const cPay = (n: number, field: "rateValue" | "advancePaid" | "shipmentAdvance") =>
     convertPayment(p, n, field, payCur(field), show, rates, ratesByDate);
   const goodsTotal = cPay(w.rateValue || 0, "rateValue");
-  const prodAdv = cPay(Math.min(w.advancePaid || 0, w.rateValue || 0), "advancePaid");
+  const prodAdv = cPay(Math.min(goodsPaid(p), w.rateValue || 0), "advancePaid");
   const shipAdv = cPay(Math.min(w.shipmentAdvance || 0, w.shipmentValue || 0), "shipmentAdvance");
   const freightFields: ExpenseMoneyField[] = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge"];
   const otherFields: ExpenseMoneyField[] = ["dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
@@ -473,7 +474,20 @@ function PnlSheet({
             <p className="eyebrow mb-3">Product payment</p>
             <div className="grid grid-cols-2 gap-3">
               <FieldMoney label="Total" cur={payCur("rateValue")} onCur={(c) => setPayCur("rateValue", c)} value={w.rateValue} onChange={(v) => setWorking("rateValue", v)} />
-              <FieldMoney label="Advance paid" cur={payCur("advancePaid")} onCur={(c) => setPayCur("advancePaid", c)} value={w.advancePaid} onChange={(v) => setWorking("advancePaid", v)} />
+              {goodsPayments(p).length > 0 ? (
+                <div>
+                  <span className="mb-1 block text-[12px] font-medium text-body">Paid so far</span>
+                  <div className="figure flex h-10 items-center rounded-sm border border-line bg-surface px-3 text-[14px] text-ink">
+                    {CURRENCY_SYMBOL[prodCur]}{goodsPaid(p).toLocaleString()}
+                    <span className="ml-auto text-[11px] text-muted">from payments below</span>
+                  </div>
+                </div>
+              ) : (
+                <FieldMoney label="Advance paid" cur={payCur("advancePaid")} onCur={(c) => setPayCur("advancePaid", c)} value={w.advancePaid} onChange={(v) => setWorking("advancePaid", v)} />
+              )}
+            </div>
+            <div className="mt-3">
+              <PaymentsEditor p={p} onChange={(next) => patchProduct(p.id, "payments", next)} />
             </div>
 
             <p className="eyebrow mb-3 mt-4">Shipment payment</p>

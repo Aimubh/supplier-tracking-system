@@ -10,6 +10,8 @@ import { CurrencyConverter } from "../currency-converter";
 import { Countdown } from "../countdown";
 import { useDraft } from "../use-draft";
 import { SaveBar } from "../save-bar";
+import { PaymentsEditor } from "../payments-editor";
+import { goodsPaid, goodsPayments } from "@/lib/order-summary";
 
 const CURRENCY_SYMBOL: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
 
@@ -72,6 +74,7 @@ function PaymentBlock({
   onCurrency,
   onTotal,
   onAdvance,
+  advanceFromList,
 }: {
   title: string;
   subtitle: string;
@@ -81,6 +84,9 @@ function PaymentBlock({
   onCurrency: (c: CurrencyCode) => void;
   onTotal: (n: number) => void;
   onAdvance: (n: number) => void;
+  // Set when the product has a payments list: "advance paid" is then the sum of
+  // its paid rows and can't be typed here.
+  advanceFromList?: boolean;
 }) {
   const sym = CURRENCY_SYMBOL[currency];
   const t = total || 0;
@@ -103,8 +109,15 @@ function PaymentBlock({
         <Field label="Total amount">
           <Num value={total} onChange={onTotal} prefix={sym} placeholder="0" blankZero />
         </Field>
-        <Field label="Advance paid">
-          <Num value={advance} onChange={onAdvance} prefix={sym} placeholder="0" blankZero />
+        <Field label={advanceFromList ? "Paid so far" : "Advance paid"}>
+          {advanceFromList ? (
+            <div className="figure flex h-10 items-center rounded-md border border-line bg-white px-3 text-[13px] text-ink">
+              {fmt(advance || 0)}
+              <span className="ml-auto text-[11px] text-muted">from payments</span>
+            </div>
+          ) : (
+            <Num value={advance} onChange={onAdvance} prefix={sym} placeholder="0" blankZero />
+          )}
         </Field>
       </div>
 
@@ -262,7 +275,8 @@ export function ProductDecisionPanel() {
           subtitle={`Goods (${w.rate})`}
           currency={w.rateCurrency ?? "INR"}
           total={w.rateValue}
-          advance={w.advancePaid}
+          advance={goodsPayments(active).length ? goodsPaid(active) : w.advancePaid}
+          advanceFromList={goodsPayments(active).length > 0}
           onCurrency={(c) => setField("rateCurrency", c)}
           onTotal={(n) => setField("rateValue", n)}
           onAdvance={(n) => setField("advancePaid", n)}
@@ -277,6 +291,11 @@ export function ProductDecisionPanel() {
           onTotal={(n) => setField("shipmentValue", n)}
           onAdvance={(n) => setField("shipmentAdvance", n)}
         />
+      </div>
+
+      {/* Each goods payment with its own date and bank rate */}
+      <div className="mt-4">
+        <PaymentsEditor p={{ ...active, working: w }} onChange={(next) => patch("payments", next)} />
       </div>
 
       {/* What the Incoterm covers vs. doesn't */}

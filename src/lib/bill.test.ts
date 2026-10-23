@@ -82,3 +82,15 @@ assert.ok(/>Per unit<\/th>/.test(view), "Order Summary needs a Per unit column")
 assert.ok(view.includes("colSpan={9}"), "the expanded sheet must span the new column");
 
 console.log("order summary: per-unit column + per-instalment rates — all checks passed");
+
+// Payments list: "paid so far" comes from the list once it has goods rows, and
+// every screen reads it through goodsPaid() — never the typed advance directly.
+assert.ok(summary.includes("export function goodsPaid("), "goodsPaid() must exist");
+assert.ok(/goodsPayments\(p\)\.length \? goodsPaidAmount\(p\) : p\.working\.advancePaid/.test(summary), "the list wins over the typed advance");
+assert.ok(/paidPart \* blended \+ convert\(n - paidPart, from, to, rates\)/.test(summary), "the unpaid balance is valued at today's rate");
+for (const f of ["../components/dashboard-view.tsx", "../components/order-summary-view.tsx", "../components/product-view-modal.tsx"]) {
+  const src = readFileSync(new URL(f, import.meta.url), "utf8");
+  assert.ok(src.includes("goodsPaid("), `${f} must read paid-so-far via goodsPaid()`);
+  assert.ok(!/working\.advancePaid \?\? 0|w\.advancePaid \|\| 0, w\.rateValue|payRows\("Product", w\.rateValue, w\.advancePaid/.test(src), `${f} still reads the typed advance directly`);
+}
+console.log("payments: list drives paid-so-far everywhere, balance at today's rate — all checks passed");

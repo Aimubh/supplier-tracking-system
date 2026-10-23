@@ -53,7 +53,13 @@ function phaseOf(p: RawProduct): { phase: Phase; percent: number; nextStep: stri
 function moneyOf(p: RawProduct): { qty: number; orderValue: number; advancePaid: number; expenses: number; currency: string } {
   const w = j(p.working), e = j(p.expenses), l = j(p.logistics);
   const orderValue = num(w.rateValue);
-  const advancePaid = Math.min(num(w.advancePaid), orderValue);
+  // Same rule as the app (goodsPaid): the payments list is the truth once it
+  // has goods entries; the typed advance only for products without one.
+  const goods = (Array.isArray(p.payments) ? p.payments : []).filter(
+    (x: { type?: string }) => x && !["FREIGHT", "DUTY", "CHA"].includes(String(x.type))
+  ) as { status?: string; amount?: number }[];
+  const paid = goods.length ? goods.filter((x) => x.status === "PAID").reduce((a, x) => a + num(x.amount), 0) : num(w.advancePaid);
+  const advancePaid = Math.min(paid, orderValue);
   const expenseFields = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge", "dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
   const expenses = expenseFields.reduce((sum, k) => sum + num(e[k]), 0) + num(l.indiaTransportCost);
   return { qty: num(w.moq), orderValue, advancePaid, expenses, currency: String(w.rateCurrency ?? "INR") };

@@ -16,6 +16,7 @@ import { computeSourcing } from "@/lib/sourcing-model";
 import { getFlow, type PhaseKey } from "@/lib/flow";
 import { motion, AnimatePresence, useReducedMotion } from "./motion";
 import { openFile } from "@/lib/open-file";
+import { goodsPaid } from "@/lib/order-summary";
 import {
   X,
   Boxes,
@@ -149,7 +150,7 @@ export function ProductViewModal({ id, onClose }: { id: string; onClose: () => v
     { label: "Order qty (MOQ)", value: w.moq > 0 ? w.moq.toLocaleString() : "—" },
     { label: "MOQ note", value: dash(w.moqNote) },
     { label: "Rate term", value: w.rateValue > 0 ? w.rate : "—" },
-    ...payRows("Product", w.rateValue, w.advancePaid, w.rateCurrency),
+    ...payRows("Product", w.rateValue, goodsPaid(p), w.rateCurrency),
     ...payRows("Shipment", w.shipmentValue, w.shipmentAdvance, w.shipmentCurrency),
     { label: "Mould required", ...yn(w.moldRequired, "Required", "Not required") },
     {

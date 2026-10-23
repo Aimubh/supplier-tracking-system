@@ -26,7 +26,7 @@ import { computeSourcing } from "@/lib/sourcing-model";
 import { activeReminders } from "@/lib/production-reminder";
 import { getFlow, type Flow, type PhaseKey, type PhaseState } from "@/lib/flow";
 import { useFxRates, useRatesForDates } from "@/lib/fx";
-import { convertPayment, valuationDates } from "@/lib/order-summary";
+import { convertPayment, goodsPaid, valuationDates } from "@/lib/order-summary";
 import { SpotlightCard } from "./spotlight-card";
 import { Reveal, Stagger, Item, motion, AnimatePresence, useReducedMotion } from "./motion";
 import { ProductViewModal } from "./product-view-modal";
@@ -161,7 +161,7 @@ export function DashboardView() {
       const cur = p.working.rateCurrency ?? "INR";
       // At the rate each payment was actually made, not today's.
       const total = convertPayment(p, p.working.rateValue ?? 0, "rateValue", cur, capCur, rates, ratesByDate);
-      const paid = Math.min(convertPayment(p, p.working.advancePaid ?? 0, "advancePaid", cur, capCur, rates, ratesByDate), total);
+      const paid = Math.min(convertPayment(p, goodsPaid(p), "advancePaid", cur, capCur, rates, ratesByDate), total);
       acc.total += total;
       acc.paid += paid;
       return acc;
@@ -532,7 +532,7 @@ function ProductRow({
             const total = p.working.rateValue ?? 0;
             if (total <= 0) return <span className="text-[13px] text-muted">—</span>;
             const sym = CUR_SYM[p.working.rateCurrency ?? "INR"] ?? "$";
-            const paid = Math.min(p.working.advancePaid ?? 0, total);
+            const paid = Math.min(goodsPaid(p), total);
             const pending = Math.max(total - paid, 0);
             return (
               <div className="leading-tight">

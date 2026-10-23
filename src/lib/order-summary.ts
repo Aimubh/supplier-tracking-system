@@ -2,7 +2,7 @@
 // Reads what's already entered across the tabs and folds in the actual expenses
 // recorded on the Order Summary page itself. Pure function, no side effects.
 
-import type { Product, CurrencyCode, ExpenseMoneyField } from "./store";
+import type { Product, Payment, CurrencyCode, ExpenseMoneyField } from "./store";
 import { getFlow } from "./flow";
 import { convert, convertAsOf, type Rates } from "./fx";
 
@@ -83,11 +83,32 @@ export function convertPayment(
   // different day (fstool: $5,846 paid 20-Jun at 94.33, not 27-May's 95.69).
   if (field === "rateValue" || field === "advancePaid") {
     const blended = instalmentValue(p, from, to, ratesByDate);
-    if (blended !== null) return n * blended;
+    if (blended !== null) {
+      if (field === "advancePaid") return n * blended;
+      // Order total: the part already paid at the rates it was paid at; the
+      // balance not yet paid at today's rate — an estimate until it's paid.
+      const paidPart = Math.min(goodsPaidAmount(p), n);
+      return paidPart * blended + convert(n - paidPart, from, to, rates);
+    }
   }
   const actual = paymentFxTable(p, field);
   if (actual && actual[from] && actual[to]) return convert(n, from, to, actual);
   return convertAsOf(n, from, to, paymentDate(p, field), ratesByDate, rates);
+}
+
+// Goods payments: everything on the payments list except freight/duty/CHA.
+export function goodsPayments(p: Product): Payment[] {
+  return (p.payments ?? []).filter((x) => x.type !== "FREIGHT" && x.type !== "DUTY" && x.type !== "CHA");
+}
+
+// What has actually been paid toward the goods, in the product currency. The
+// payments list is the truth once it has entries; the single typed "advance
+// paid" figure is used only for products that have no payments list yet.
+export function goodsPaid(p: Product): number {
+  return goodsPayments(p).length ? goodsPaidAmount(p) : p.working.advancePaid || 0;
+}
+function goodsPaidAmount(p: Product): number {
+  return goodsPayments(p).filter((x) => x.status === "PAID").reduce((a, x) => a + (x.amount || 0), 0);
 }
 
 // Value of one unit of `from` across the PAID goods instalments, each converted
@@ -224,7 +245,10 @@ export function computeOrderSummary(
 
   const totalQty = w.moq || 0;
   const goodsTotal = pay("rateValue");
-  const advancePaid = Math.min(pay("advancePaid"), goodsTotal);
+  const advancePaid = Math.min(
+    convertAsOf(goodsPaid(p), paymentCurrency(p, "advancePaid"), base, paymentDate(p, "advancePaid"), ratesByDate, rates),
+    goodsTotal
+  );
   const goodsPending = Math.max(goodsTotal - advancePaid, 0);
 
   // Freight = itemised lines (ocean + destination charges + GST), falling back to
