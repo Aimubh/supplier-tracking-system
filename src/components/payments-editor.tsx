@@ -1,16 +1,17 @@
 "use client";
 
 // The goods payments for one product: each remittance on its own row with the
-// day it went out, the amount, and the bank rate it was converted at. Paid and
-// pending are worked out from the rows, so a balance paid weeks after the
-// advance is valued at ITS day's rate, not the advance's. Freight / duty / CHA
-// entries on the same list are left untouched.
+// day it went out, the amount, and the USD rate it was paid at — typed in by
+// hand from the bank's debit advice, never looked up. Paid and pending are
+// worked out from the rows, so a balance paid weeks after the advance is valued
+// at ITS rate, not the advance's. Freight / duty / CHA entries on the same list
+// are left untouched.
 
 import clsx from "clsx";
 import { Plus, X } from "lucide-react";
 import { useStore, type Payment, type Product, type PaymentType } from "@/lib/store";
 import { goodsPayments } from "@/lib/order-summary";
-import { useFxRates, useRatesForDates, CURRENCY_SYMBOL } from "@/lib/fx";
+import { useFxRates, CURRENCY_SYMBOL } from "@/lib/fx";
 import { Num } from "./fields";
 
 const TYPES: { value: PaymentType; label: string }[] = [
@@ -20,12 +21,12 @@ const TYPES: { value: PaymentType; label: string }[] = [
 ];
 
 // A small labelled field, with an optional note under the input.
-function Lbl({ text, note, children }: { text: string; note?: string; children: React.ReactNode }) {
+function Lbl({ text, note, warn, children }: { text: string; note?: string; warn?: boolean; children: React.ReactNode }) {
   return (
     <label className="block min-w-0">
       <span className="mb-1 block text-[11px] font-medium text-body">{text}</span>
       {children}
-      {note && <span className="mt-1 block text-[10.5px] leading-tight text-muted">{note}</span>}
+      {note && <span className={clsx("mt-1 block text-[10.5px] leading-tight", warn ? "font-medium text-pending" : "text-muted")}>{note}</span>}
     </label>
   );
 }
@@ -41,13 +42,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
   const foreign = cur !== "INR";
   const rows = goodsPayments(p);
   const others = (p.payments ?? []).filter((x) => !rows.includes(x));
-  const byDate = useRatesForDates(rows.map((x) => x.paidDate || x.dueDate));
-
-  // ₹ per unit of the product currency: on a given day, or today.
-  const rateOn = (date: string) => {
-    const t = date ? byDate[date] : null;
-    return t && t.INR && t[cur] ? t.INR / t[cur] : null;
-  };
+  // ₹ per unit of the product currency today — only ever used as an estimate.
   const today = fx.rates && fx.rates.INR && fx.rates[cur] ? fx.rates.INR / fx.rates[cur] : null;
 
   const save = (next: Payment[]) => onChange([...others, ...next]);
@@ -59,19 +54,15 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
   const paidAmt = paidRows.reduce((a, x) => a + (x.amount || 0), 0);
   const pendingAmt = Math.max(total - paidAmt, 0);
 
-  // Rupees per row: a paid row at its bank rate, else the market rate on its
-  // date; an unpaid row is only an estimate at today's rate.
-  const valueOf = (x: Payment): { inr: number | null; rate: number | null; how: string } => {
-    if (!foreign) return { inr: x.amount || 0, rate: null, how: "" };
-    if (x.status === "PAID") {
-      if (x.fxRate) return { inr: (x.amount || 0) * x.fxRate, rate: x.fxRate, how: "bank rate" };
-      const m = rateOn(x.paidDate);
-      return m ? { inr: (x.amount || 0) * m, rate: m, how: "market rate that day" } : { inr: null, rate: null, how: x.paidDate ? "loading rate…" : "add the date paid" };
-    }
-    return today ? { inr: (x.amount || 0) * today, rate: today, how: "estimate at today's rate" } : { inr: null, rate: null, how: "" };
+  // Rupees per row: the rate typed for it. A row with no rate yet (paid or not)
+  // is only an estimate at today's rate, and says so.
+  const valueOf = (x: Payment): { inr: number | null; rate: number | null; exact: boolean } => {
+    if (!foreign) return { inr: x.amount || 0, rate: null, exact: true };
+    if (x.fxRate) return { inr: (x.amount || 0) * x.fxRate, rate: x.fxRate, exact: true };
+    return today ? { inr: (x.amount || 0) * today, rate: today, exact: false } : { inr: null, rate: null, exact: false };
   };
   const paidInr = paidRows.reduce((a, x) => a + (valueOf(x).inr ?? 0), 0);
-  const paidInrKnown = paidRows.every((x) => valueOf(x).inr !== null);
+  const paidExact = paidRows.every((x) => valueOf(x).exact);
 
   function add() {
     const remaining = r2(Math.max(total - listed, 0));
@@ -90,7 +81,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
     <div className="rounded-md border border-line bg-white p-3">
       <div className="mb-2 flex items-baseline justify-between">
         <p className="eyebrow">Payments</p>
-        <span className="text-[11px] text-muted">each valued at its own day&apos;s rate · saves as you type</span>
+        <span className="text-[11px] text-muted">each valued at the rate you enter · saves as you type</span>
       </div>
 
       {rows.length === 0 ? (
@@ -110,7 +101,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
           {rows.map((x) => {
             const v = valueOf(x);
             const date = x.status === "PAID" ? x.paidDate : x.dueDate;
-            const market = rateOn(date);
+            const needsRate = foreign && x.status === "PAID" && !x.fxRate;
             return (
               <div key={x.id} className="rounded-md border border-line bg-surface p-2.5">
                 <div className={clsx("grid grid-cols-2 items-start gap-2", foreign ? "sm:grid-cols-[110px_1fr_1fr_1.3fr_auto]" : "sm:grid-cols-[110px_1fr_1fr_auto]")}>
@@ -130,8 +121,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
                   </Lbl>
                   {foreign && (
                     <Lbl text={`${cur} rate on ${x.status === "PAID" ? "the day paid" : "payment day"} (₹ per ${sym}1)`}
-                      note={market ? `Market rate that day: ${market.toFixed(2)} · used if you leave this empty`
-                        : date ? "Loading that day's market rate…" : "Pick the date to see that day's market rate"}>
+                      note={needsRate ? "Enter the rate from the bank's debit advice" : undefined} warn={needsRate}>
                       <Num value={x.fxRate ?? 0} onChange={(n) => update(x.id, { fxRate: n > 0 ? n : undefined })} prefix="₹"
                         placeholder="from the bank's debit advice" blankZero />
                     </Lbl>
@@ -149,9 +139,10 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
                   </div>
                 </div>
                 {foreign && (
-                  <p className={clsx("mt-1.5 text-[11px]", x.status === "PAID" ? "text-body" : "text-pending")}>
-                    {v.inr !== null ? `${x.status === "PAID" ? "" : "≈ "}${inr(v.inr)}` : "—"}
-                    {v.rate ? ` at ${v.rate.toFixed(4)}` : ""}{v.how ? ` · ${v.how}` : ""}
+                  <p className={clsx("mt-1.5 text-[11px]", v.exact ? "text-body" : "text-pending")}>
+                    {v.inr !== null ? `${v.exact ? "" : "≈ "}${inr(v.inr)}` : "—"}
+                    {v.rate ? ` at ${v.rate.toFixed(v.exact ? 4 : 2)}` : ""}
+                    {v.exact ? " · rate entered" : v.rate ? " · estimate at today's rate until a rate is entered" : ""}
                   </p>
                 )}
               </div>
@@ -175,7 +166,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
           <div className="rounded-md bg-go/10 px-2.5 py-2">
             <p className="eyebrow">Paid</p>
             <p className="figure font-semibold text-go">{sym}{r2(paidAmt).toLocaleString()}</p>
-            {foreign && <p className="figure text-[11px] text-body">{paidInrKnown ? inr(paidInr) : "add dates to value"}</p>}
+            {foreign && <p className={clsx("figure text-[11px]", paidExact ? "text-body" : "text-pending")}>{paidExact ? inr(paidInr) : `≈ ${inr(paidInr)} · a paid row has no rate yet`}</p>}
           </div>
           <div className="rounded-md bg-pending/10 px-2.5 py-2">
             <p className="eyebrow">Still to pay</p>

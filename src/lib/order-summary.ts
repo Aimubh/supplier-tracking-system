@@ -77,12 +77,12 @@ export function convertPayment(
   rates: Rates | null,
   ratesByDate: Record<string, Rates | null> = {}
 ): number {
-  // Goods: every instalment at its OWN rate — the bank rate when recorded,
-  // else the market rate on the day it was paid — blended by amount. Valuing
-  // the whole order at the deposit-day rate mis-prices any balance paid on a
-  // different day (fstool: $5,846 paid 20-Jun at 94.33, not 27-May's 95.69).
+  // Goods: every instalment at the rate ENTERED for it (from the bank's debit
+  // advice), blended by amount. Rates are never looked up automatically: a paid
+  // instalment with no rate entered yet counts at today's rate, as an estimate,
+  // and the payments box flags it until a rate is typed in.
   if (field === "rateValue" || field === "advancePaid") {
-    const blended = instalmentValue(p, from, to, ratesByDate);
+    const blended = instalmentValue(p, from, to, rates);
     if (blended !== null) {
       if (field === "advancePaid") return n * blended;
       // Order total: the part already paid at the rates it was paid at; the
@@ -111,14 +111,20 @@ function goodsPaidAmount(p: Product): number {
   return goodsPayments(p).filter((x) => x.status === "PAID").reduce((a, x) => a + (x.amount || 0), 0);
 }
 
-// Value of one unit of `from` across the PAID goods instalments, each converted
-// at its own rate. Null when there is nothing to blend or a dated table hasn't
-// loaded yet (the caller falls back, and the view re-renders once it arrives).
+// The rate table for one payment: the rate typed for it, as "rupees per 1 unit
+// of the payment's currency". Null when none was entered.
+export function enteredRate(x: Payment, from: CurrencyCode): Rates | null {
+  return x.fxRate ? ({ [x.currency || from]: 1, INR: x.fxRate } as Rates) : null;
+}
+
+// Value of one unit of `from` across the PAID goods instalments, each at the
+// rate entered for it, or today's rate (an estimate) where none was entered.
+// Null when there is nothing to blend or today's rate hasn't loaded yet.
 function instalmentValue(
   p: Product,
   from: CurrencyCode,
   to: CurrencyCode,
-  ratesByDate: Record<string, Rates | null>
+  live: Rates | null
 ): number | null {
   const paid = (p.payments ?? []).filter(
     (x) => x.status === "PAID" && (x.amount || 0) > 0 && x.type !== "FREIGHT" && x.type !== "DUTY" && x.type !== "CHA"
@@ -128,8 +134,8 @@ function instalmentValue(
   let value = 0;
   for (const x of paid) {
     if ((x.currency || from) !== from) return null; // mixed currencies: don't guess
-    const bank: Rates | null = x.fxRate ? { USD: 1, INR: x.fxRate } : null;
-    const table = bank && bank[from] && bank[to] ? bank : x.paidDate ? ratesByDate[x.paidDate] : null;
+    const entered = enteredRate(x, from);
+    const table = entered && entered[from] && entered[to] ? entered : live;
     if (from !== to && !(table && table[from] && table[to])) return null;
     value += convert(x.amount, from, to, table);
   }

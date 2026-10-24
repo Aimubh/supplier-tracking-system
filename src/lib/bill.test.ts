@@ -73,7 +73,11 @@ console.log("bill: per-piece line derives from per-unit — all checks passed");
 // single order-date rate for the whole amount mis-prices any balance paid on a
 // different day, and the bill's own Payments table would then disagree with it.
 assert.ok(summary.includes("function instalmentValue("), "goods must be blended per instalment");
-assert.ok(/ratesByDate\[x\.paidDate\]/.test(summary), "each instalment must use the rate on its own paid date");
+// Rates are typed in by hand, never looked up: each instalment uses the rate
+// entered for it, else today's rate as an estimate - no historical lookup.
+const iv = summary.slice(summary.indexOf("function instalmentValue("), summary.indexOf("// Every date this product needs"));
+assert.ok(/enteredRate\(x, from\)/.test(iv) && /: live;/.test(iv), "each instalment must use its entered rate, else today's");
+assert.ok(!/ratesByDate/.test(iv), "payment values must not use an automatic historical market rate");
 assert.ok(summary.includes("x.fxRate ?"), "a recorded bank rate must win over the market rate");
 
 // The Order Summary table carries a Per unit column.

@@ -3,8 +3,8 @@
 // the app's CSS so the printed page is predictable.
 
 import { itemLabel, type Product, type CurrencyCode, type ExpenseMoneyField } from "./store";
-import { computeOrderSummary, convertPayment, expenseCurrency } from "./order-summary";
-import { convert, convertAsOf, type Rates } from "./fx";
+import { computeOrderSummary, convertPayment, enteredRate, expenseCurrency } from "./order-summary";
+import { convert, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
 
@@ -113,13 +113,16 @@ export function openOrderBill(
       const cur = (x.currency || prodCur) as CurrencyCode;
       const date = x.paidDate || x.dueDate;
       // A rate recorded on the remittance is the truth; otherwise the market rate that day.
-      const bank = x.fxRate && cur === "USD" && disp === "INR" ? { USD: 1, INR: x.fxRate } : null;
-      const val = bank ? convert(x.amount, cur, disp, bank) : convertAsOf(x.amount, cur, disp, date, ratesByDate, r);
+      // The rate entered for this payment; none entered yet = today's rate, marked est.
+      const entered = enteredRate(x, cur);
+      const bank = entered && entered[cur] && entered[disp] ? entered : null;
+      const val = bank ? convert(x.amount, cur, disp, bank) : convert(x.amount, cur, disp, r);
       const rate = cur === disp ? null : bank ? x.fxRate : val / x.amount;
+      const est = cur !== disp && !bank ? ` <span class="muted">est.</span>` : "";
       const status = x.status === "PAID" ? "" : ` <span class="muted">(pending)</span>`;
       return `<tr><td>${esc(date || "—")}</td><td>${esc(PAY_LABEL[x.type] ?? x.type)}${status}</td>` +
         `<td class="num">${esc(SYM[cur] ?? "")}${esc(x.amount.toLocaleString())}</td>` +
-        `<td class="num">${rate ? esc(rate.toLocaleString(undefined, { maximumFractionDigits: 4 })) : "—"}</td>` +
+        `<td class="num">${rate ? esc(rate.toLocaleString(undefined, { maximumFractionDigits: 4 })) + est : "—"}</td>` +
         `<td class="num">${esc(money(val))}</td></tr>`;
     });
   const paymentsHtml = payRows.length
@@ -129,7 +132,7 @@ export function openOrderBill(
       <tr class="head"><td>Date</td><td>Payment</td><td class="num">Amount</td><td class="num">Rate</td><td class="num">Value (${esc(disp)})</td></tr>
       ${payRows.join("")}
     </table>
-    <p class="muted" style="font-size:11px;margin:6px 0 0">Each payment is valued at the exchange rate on the day it was made.</p>`
+    <p class="muted" style="font-size:11px;margin:6px 0 0">Each payment is valued at the exchange rate entered for it; "est." means no rate was entered yet, so today's rate is used.</p>`
     : "";
 
   // First product photo. Records from the light list arrive with media stripped,
