@@ -19,6 +19,17 @@ const TYPES: { value: PaymentType; label: string }[] = [
   { value: "OTHER", label: "Other" },
 ];
 
+// A small labelled field, with an optional note under the input.
+function Lbl({ text, note, children }: { text: string; note?: string; children: React.ReactNode }) {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-1 block text-[11px] font-medium text-body">{text}</span>
+      {children}
+      {note && <span className="mt-1 block text-[10.5px] leading-tight text-muted">{note}</span>}
+    </label>
+  );
+}
+
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -102,20 +113,30 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
             const market = rateOn(date);
             return (
               <div key={x.id} className="rounded-md border border-line bg-surface p-2.5">
-                <div className={clsx("grid grid-cols-2 gap-2", foreign ? "sm:grid-cols-[110px_1fr_1fr_1fr_auto]" : "sm:grid-cols-[110px_1fr_1fr_auto]")}>
-                  <select value={x.type} onChange={(e) => update(x.id, { type: e.target.value as PaymentType })}
-                    className="h-9 rounded-sm border border-line bg-white px-2 text-[13px] text-ink focus:border-link focus:outline-none">
-                    {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                  <input type="date" value={date || ""} title={x.status === "PAID" ? "Date paid" : "Due date"}
-                    onChange={(e) => update(x.id, x.status === "PAID" ? { paidDate: e.target.value, dueDate: x.dueDate || e.target.value } : { dueDate: e.target.value })}
-                    className="h-9 rounded-sm border border-line bg-white px-2 text-[13px] text-ink focus:border-link focus:outline-none" />
-                  <Num value={x.amount} onChange={(n) => update(x.id, { amount: n })} prefix={sym} placeholder="amount" blankZero />
+                <div className={clsx("grid grid-cols-2 items-start gap-2", foreign ? "sm:grid-cols-[110px_1fr_1fr_1.3fr_auto]" : "sm:grid-cols-[110px_1fr_1fr_auto]")}>
+                  <Lbl text="Payment">
+                    <select value={x.type} onChange={(e) => update(x.id, { type: e.target.value as PaymentType })}
+                      className="h-10 w-full rounded-sm border border-line bg-white px-2 text-[13px] text-ink focus:border-link focus:outline-none">
+                      {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </Lbl>
+                  <Lbl text={x.status === "PAID" ? "Date paid" : "Due date"}>
+                    <input type="date" value={date || ""}
+                      onChange={(e) => update(x.id, x.status === "PAID" ? { paidDate: e.target.value, dueDate: x.dueDate || e.target.value } : { dueDate: e.target.value })}
+                      className="h-10 w-full rounded-sm border border-line bg-white px-2 text-[13px] text-ink focus:border-link focus:outline-none" />
+                  </Lbl>
+                  <Lbl text={`Amount (${cur})`}>
+                    <Num value={x.amount} onChange={(n) => update(x.id, { amount: n })} prefix={sym} placeholder="0" blankZero />
+                  </Lbl>
                   {foreign && (
-                    <Num value={x.fxRate ?? 0} onChange={(n) => update(x.id, { fxRate: n > 0 ? n : undefined })} prefix="₹"
-                      placeholder={market ? `market ${market.toFixed(2)}` : "bank rate"} blankZero />
+                    <Lbl text={`${cur} rate on ${x.status === "PAID" ? "the day paid" : "payment day"} (₹ per ${sym}1)`}
+                      note={market ? `Market rate that day: ${market.toFixed(2)} · used if you leave this empty`
+                        : date ? "Loading that day's market rate…" : "Pick the date to see that day's market rate"}>
+                      <Num value={x.fxRate ?? 0} onChange={(n) => update(x.id, { fxRate: n > 0 ? n : undefined })} prefix="₹"
+                        placeholder="from the bank's debit advice" blankZero />
+                    </Lbl>
                   )}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 self-end pb-2.5">
                     <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink">
                       <input type="checkbox" checked={x.status === "PAID"}
                         onChange={(e) => update(x.id, e.target.checked
