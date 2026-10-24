@@ -21,7 +21,14 @@ for (const view of ["../components/order-summary-view.tsx", "../components/dashb
 assert.ok(bill.includes("convertPayment("), "bill must value payments via convertPayment");
 // The bill lists each remittance with its date, amount and bank rate, so the
 // goods figure can be re-added by hand. It sits before the charges table.
-assert.ok(bill.includes("<h2>Payments</h2>"), "bill needs a Payments section");
+assert.ok(bill.includes("<h2>Product payments"), "bill needs a Product payments section");
+// It says whether the goods are fully paid, lists the unpaid balance as its own
+// line at today's rate, and shows each payment's rate and bank charges.
+assert.ok(bill.includes('"FULLY PAID"') && bill.includes("PARTLY PAID") && bill.includes('"NOT PAID YET"'), "bill must state the payment status");
+assert.ok(/label: "Balance", date: "to be paid"/.test(bill), "the unpaid balance must appear as a line");
+assert.ok(/rate \(₹\)<\/td>/.test(bill) && /Bank charges<\/td>/.test(bill), "payment lines show the USD rate and bank charges");
+// Goods with no paid, rated payment are valued at today's rate, never an automatic historical one.
+assert.ok(/\/\/ No paid payment to value[\s\S]{0,400}return convert\(n, from, to, rates\);/.test(summary), "no-list goods must use today's rate");
 assert.ok(bill.includes("${paymentsHtml}"), "Payments section must be rendered");
 assert.ok(bill.indexOf("${paymentsHtml}") < bill.indexOf("<h2>Charges"), "Payments come before charges");
 

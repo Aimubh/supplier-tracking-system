@@ -3,7 +3,7 @@
 // the app's CSS so the printed page is predictable.
 
 import { itemLabel, type Product, type CurrencyCode, type ExpenseMoneyField } from "./store";
-import { bankChargesInr, computeOrderSummary, convertPayment, enteredRate, expenseCurrency } from "./order-summary";
+import { bankChargesInr, computeOrderSummary, convertPayment, enteredRate, expenseCurrency, goodsPaid, goodsPayments } from "./order-summary";
 import { convert, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
@@ -102,38 +102,66 @@ export function openOrderBill(
       )
       .join("") || `<tr><td class="muted">No expenses recorded yet</td><td class="num">—</td></tr>`;
 
-  // Each remittance on its own line: the day it went out, the foreign amount, the
-  // rate the bank gave, and what it cost in the display currency. This is the
-  // audit trail for "Order amount" — the reader can re-add it by hand.
+  // ---- Product payments: each payment with the USD rate it was paid at, the
+  // balance still to pay, and whether the goods are fully paid.
+  const foreign = prodCur !== disp;
+  const today = foreign ? convert(1, prodCur, disp, r) : 1;
+  const rateTxt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
   const PAY_LABEL: Record<string, string> = {
-    DEPOSIT: "Deposit", BALANCE: "Balance", FREIGHT: "Freight", DUTY: "Duty", CHA: "CHA", OTHER: "Other",
+    DEPOSIT: "Advance", BALANCE: "Balance", FREIGHT: "Freight", DUTY: "Duty", CHA: "CHA", OTHER: "Other",
   };
-  const payRows = (p.payments ?? [])
+  type Line = { label: string; date: string; amount: number; cur: CurrencyCode; rate: string; value: number; approx: boolean; bank: number; paid: boolean };
+  const lines: Line[] = (p.payments ?? [])
     .filter((x) => (x.amount || 0) > 0)
     .map((x) => {
       const cur = (x.currency || prodCur) as CurrencyCode;
-      const date = x.paidDate || x.dueDate;
-      // A rate recorded on the remittance is the truth; otherwise the market rate that day.
-      // The rate entered for this payment; none entered yet = today's rate, marked est.
+      // The rate typed for this payment; none entered yet = today's rate, an estimate.
       const entered = enteredRate(x, cur);
-      const bank = entered && entered[cur] && entered[disp] ? entered : null;
-      const val = bank ? convert(x.amount, cur, disp, bank) : convert(x.amount, cur, disp, r);
-      const rate = cur === disp ? null : bank ? x.fxRate : val / x.amount;
-      const est = cur !== disp && !bank ? ` <span class="muted">est.</span>` : "";
-      const status = x.status === "PAID" ? "" : ` <span class="muted">(pending)</span>`;
-      return `<tr><td>${esc(date || "—")}</td><td>${esc(PAY_LABEL[x.type] ?? x.type)}${status}</td>` +
-        `<td class="num">${esc(SYM[cur] ?? "")}${esc(x.amount.toLocaleString())}</td>` +
-        `<td class="num">${rate ? esc(rate.toLocaleString(undefined, { maximumFractionDigits: 4 })) + est : "—"}</td>` +
-        `<td class="num">${esc(money(val))}</td></tr>`;
+      const table = entered && entered[cur] && entered[disp] ? entered : null;
+      const value = convert(x.amount, cur, disp, table ?? r);
+      const rate = cur === disp ? "—" : table ? rateTxt(x.fxRate as number) : `${rateTxt(value / x.amount)} est.`;
+      return { label: PAY_LABEL[x.type] ?? x.type, date: (x.status === "PAID" ? x.paidDate : x.dueDate) || "—", amount: x.amount, cur,
+        rate, value, approx: cur !== disp && !table, bank: x.bankCharges || 0, paid: x.status === "PAID" };
     });
-  const paymentsHtml = payRows.length
+
+  const goodsTotalPc = s.goodsTotal;          // order value, product currency
+  const paidPc = Math.min(goodsPaid(p), goodsTotalPc || goodsPaid(p));
+  const listedPc = goodsPayments(p).reduce((a, x) => a + (x.amount || 0), 0);
+  // A product with only the old typed advance: show it as the advance line.
+  if (goodsPayments(p).length === 0 && paidPc > 0) {
+    lines.unshift({ label: "Advance", date: "—", amount: paidPc, cur: prodCur, rate: foreign ? `${rateTxt(dProdAdv / paidPc)} est.` : "—",
+      value: dProdAdv, approx: foreign, bank: 0, paid: true });
+  }
+  // The part of the order not on any payment line yet is the balance to pay.
+  const unlisted = Math.max(goodsTotalPc - Math.max(listedPc, goodsPayments(p).length ? 0 : paidPc), 0);
+  if (unlisted > 0.005) {
+    lines.push({ label: "Balance", date: "to be paid", amount: unlisted, cur: prodCur, rate: foreign ? `${rateTxt(today)} today, est.` : "—",
+      value: convert(unlisted, prodCur, disp, r), approx: foreign, bank: 0, paid: false });
+  }
+
+  const balancePc = Math.max(goodsTotalPc - paidPc, 0);
+  const payStatus = goodsTotalPc <= 0 ? null
+    : balancePc <= 0.005 ? { cls: "paid", text: "FULLY PAID" }
+    : paidPc > 0 ? { cls: "part", text: `PARTLY PAID · ${SYM[prodCur]}${balancePc.toLocaleString(undefined, { maximumFractionDigits: 2 })} balance still to pay` }
+    : { cls: "none", text: "NOT PAID YET" };
+  const bankTotal = lines.reduce((a, l) => a + l.bank, 0);
+  const sym0 = (c: CurrencyCode) => SYM[c] ?? "";
+
+  const paymentsHtml = goodsTotalPc > 0 || lines.length
     ? `
-    <h2>Payments</h2>
-    <table>
-      <tr class="head"><td>Date</td><td>Payment</td><td class="num">Amount</td><td class="num">Rate</td><td class="num">Value (${esc(disp)})</td></tr>
-      ${payRows.join("")}
+    <h2>Product payments ${payStatus ? `<span class="pill ${payStatus.cls}">${esc(payStatus.text)}</span>` : ""}</h2>
+    <table class="pay">
+      <tr class="head"><td>Payment</td><td>Date paid</td><td class="num">Amount</td><td class="num">${esc(prodCur)} rate (₹)</td><td class="num">Value (${esc(disp)})</td><td class="num">Bank charges</td><td class="num">Status</td></tr>
+      ${lines.map((l) => `<tr>
+        <td>${esc(l.label)}</td><td>${esc(l.date)}</td>
+        <td class="num">${esc(sym0(l.cur))}${esc(l.amount.toLocaleString(undefined, { maximumFractionDigits: 2 }))}</td>
+        <td class="num">${esc(l.rate)}</td>
+        <td class="num">${l.approx ? "≈ " : ""}${esc(money(l.value))}</td>
+        <td class="num">${l.bank ? esc(`₹${l.bank.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`) : "—"}</td>
+        <td class="num"><span class="st ${l.paid ? "ok" : "due"}">${l.paid ? "Paid" : "Pending"}</span></td></tr>`).join("")}
     </table>
-    <p class="muted" style="font-size:11px;margin:6px 0 0">Each payment is valued at the exchange rate entered for it; "est." means no rate was entered yet, so today's rate is used.</p>`
+    <p class="muted" style="font-size:11px;margin:6px 0 0">Paid ${esc(sym0(prodCur))}${esc(paidPc.toLocaleString(undefined, { maximumFractionDigits: 2 }))} = ${esc(money(dProdAdv))} at the rates paid${balancePc > 0.005 ? ` · balance ${esc(sym0(prodCur))}${esc(balancePc.toLocaleString(undefined, { maximumFractionDigits: 2 }))} ≈ ${esc(money(convert(balancePc, prodCur, disp, r)))} at today's rate` : ""}${bankTotal ? ` · bank charges ₹${esc(bankTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 }))}` : ""}.
+      "est." / ≈ means no rate has been entered for that payment yet, so today's rate is used.</p>`
     : "";
 
   // First product photo. Records from the light list arrive with media stripped,
@@ -149,7 +177,7 @@ export function openOrderBill(
 
   // Payments breakdown rows (product + shipment) inside the summary totals.
   const dueRow = `
-      <tr><td>Product advance paid</td><td class="num">${esc(money(dProdAdv))}</td></tr>
+      <tr><td>Product paid so far</td><td class="num">${esc(money(dProdAdv))}</td></tr>
       <tr><td>Shipment advance paid</td><td class="num">${esc(money(dShipAdv))}</td></tr>
       <tr><td>Total paid</td><td class="num">${esc(money(dTotalPaid))}</td></tr>
       ${s.arrived ? "" : `<tr class="due-row"><td><strong>Pending / amount due</strong></td><td class="num"><strong>${esc(money(dOutstanding))}</strong></td></tr>`}`;
@@ -171,6 +199,10 @@ export function openOrderBill(
   td { padding: 7px 0; border-bottom: 1px solid #eee; vertical-align: top; }
   td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   tr.head td { font-size: 11px; color: #41454d; text-transform: uppercase; letter-spacing: .08em; }
+  table.pay td { padding: 6px 4px; font-size: 12px; }
+  .pill { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 10px; letter-spacing: .06em; vertical-align: middle; }
+  .pill.paid { background: #e3f3e3; color: #006400; } .pill.part { background: #fdf3e2; color: #9a5b00; } .pill.none { background: #fdecea; color: #aa2d00; }
+  .st { font-weight: 600; } .st.ok { color: #006400; } .st.due { color: #9a5b00; }
   .photo { display: block; width: 132px; height: 132px; object-fit: cover; border: 1px solid #e6e6e6; border-radius: 8px; margin: 4px 0 12px; }
   .photo[hidden] { display: none; }
   .muted { color: #9297a0; }
@@ -234,8 +266,9 @@ export function openOrderBill(
     <div class="grid">
       <div><span>Quantity</span><span>${s.totalQty > 0 ? esc(s.totalQty.toLocaleString()) : "—"}</span></div>
       <div><span>Order amount</span><span>${s.goodsTotal > 0 ? esc(money(dGoods)) : "—"}</span></div>
-      <div><span>Advance paid</span><span>${s.advancePaid > 0 ? esc(money(dProdAdv)) : "—"}</span></div>
-      <div><span>Balance pending</span><span>${s.goodsPending > 0 ? esc(money(cP(s.goodsPending))) : "—"}</span></div>
+      <div><span>Paid so far</span><span>${s.advancePaid > 0 ? esc(money(dProdAdv)) : "—"}</span></div>
+      <div><span>Balance to pay</span><span>${balancePc > 0.005 ? esc(`${sym0(prodCur)}${balancePc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`) : "—"}</span></div>
+      <div><span>Payment status</span><span>${payStatus ? esc(payStatus.text.split(" · ")[0]) : "—"}</span></div>
       <div><span>Start date</span><span>${esc(s.startDate || "—")}</span></div>
       <div><span>End date</span><span>${esc(s.endDate || "—")}</span></div>
     </div>

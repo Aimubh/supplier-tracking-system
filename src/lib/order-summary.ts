@@ -90,6 +90,11 @@ export function convertPayment(
       const paidPart = Math.min(goodsPaidAmount(p), n);
       return paidPart * blended + convert(n - paidPart, from, to, rates);
     }
+    // No paid payment to value (no payments list yet, or nothing paid): there
+    // is no entered rate to go on, so today's rate - an estimate, never an
+    // automatic historical one. Keeps the order amount equal to advance +
+    // balance on the bill for these products too.
+    return convert(n, from, to, rates);
   }
   const actual = paymentFxTable(p, field);
   if (actual && actual[from] && actual[to]) return convert(n, from, to, actual);
