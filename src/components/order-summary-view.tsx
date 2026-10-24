@@ -21,7 +21,7 @@ import {
   Search,
 } from "lucide-react";
 import { useStore, itemLabel, type Product, type Expenses, type Working, type Logistics, type CurrencyCode, type ExpenseMoneyField } from "@/lib/store";
-import { computeOrderSummary, convertPayment, goodsPaid, goodsPayments, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
+import { bankChargesInr, computeOrderSummary, convertPayment, goodsPaid, goodsPayments, expenseCurrency, paymentCurrency, expensesIn, valuationDates } from "@/lib/order-summary";
 import { openOrderBill } from "@/lib/bill";
 import { PaymentsEditor } from "./payments-editor";
 import { useFxRates, useRatesForDates, convert, CURRENCY_SYMBOL } from "@/lib/fx";
@@ -432,6 +432,7 @@ function PnlSheet({
   const costLines: { label: string; amount: number }[] = [
     ...[...freightFields, ...otherFields].map((k) => ({ label: COST_LABELS[k as string], amount: toDisp((e[k] as number) || 0, expCur(k)) })),
     { label: COST_LABELS.indiaTransport, amount: toDisp(l.indiaTransportCost || 0, prodCur) },
+    { label: "Bank charges on payments", amount: toDisp(bankChargesInr(p), "INR") },
   ].filter((x) => x.amount > 0);
 
   const FREIGHT_META: Record<string, { label: string; hint: string }> = {

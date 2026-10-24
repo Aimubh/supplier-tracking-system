@@ -98,3 +98,11 @@ for (const f of ["../components/dashboard-view.tsx", "../components/order-summar
   assert.ok(!/working\.advancePaid \?\? 0|w\.advancePaid \|\| 0, w\.rateValue|payRows\("Product", w\.rateValue, w\.advancePaid/.test(src), `${f} still reads the typed advance directly`);
 }
 console.log("payments: list drives paid-so-far everywhere, balance at today's rate — all checks passed");
+
+// Bank charges live on each payment and are counted in every expense total:
+// the summary, the sheet's expense sum, and the bill's charge lines.
+assert.ok(summary.includes("export function bankChargesInr("), "bankChargesInr() must exist");
+assert.ok(/expensesTotal = freight \+ duty \+ cha \+ lastMile \+ other \+ bank/.test(summary), "landed cost must include bank charges");
+assert.ok(/return fields \+ india \+ convert\(bankChargesInr\(p\)/.test(summary), "the sheet's expense sum must include bank charges");
+assert.ok(bill.includes('["Bank charges on payments", convert(bankChargesInr(p)'), "the bill must show bank charges");
+console.log("bank charges: counted in every expense total and on the bill — all checks passed");

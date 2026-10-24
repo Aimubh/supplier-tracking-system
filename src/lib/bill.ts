@@ -3,7 +3,7 @@
 // the app's CSS so the printed page is predictable.
 
 import { itemLabel, type Product, type CurrencyCode, type ExpenseMoneyField } from "./store";
-import { computeOrderSummary, convertPayment, enteredRate, expenseCurrency } from "./order-summary";
+import { bankChargesInr, computeOrderSummary, convertPayment, enteredRate, expenseCurrency } from "./order-summary";
 import { convert, type Rates } from "./fx";
 
 const SYM: Record<CurrencyCode, string> = { USD: "$", INR: "₹", CNY: "¥" };
@@ -91,6 +91,7 @@ export function openOrderBill(
     ["Last-mile transport", cField("lastMileCost", e.lastMileCost || 0)],
     ["Port-to-warehouse transport", cP(p.logistics.indiaTransportCost || 0)],
     ["Other", cField("otherExpense", e.otherExpense || 0)],
+    ["Bank charges on payments", convert(bankChargesInr(p), "INR", disp, r)],
   ];
   const chargesHtml =
     chargeRows

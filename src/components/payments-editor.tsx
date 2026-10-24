@@ -24,7 +24,7 @@ const TYPES: { value: PaymentType; label: string }[] = [
 function Lbl({ text, note, warn, children }: { text: string; note?: string; warn?: boolean; children: React.ReactNode }) {
   return (
     <label className="block min-w-0">
-      <span className="mb-1 block text-[11px] font-medium text-body">{text}</span>
+      <span className="mb-1 block truncate text-[11px] font-medium text-body" title={text}>{text}</span>
       {children}
       {note && <span className={clsx("mt-1 block text-[10.5px] leading-tight", warn ? "font-medium text-pending" : "text-muted")}>{note}</span>}
     </label>
@@ -63,6 +63,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
   };
   const paidInr = paidRows.reduce((a, x) => a + (valueOf(x).inr ?? 0), 0);
   const paidExact = paidRows.every((x) => valueOf(x).exact);
+  const bankTotal = rows.reduce((a, x) => a + (x.bankCharges || 0), 0);
 
   function add() {
     const remaining = r2(Math.max(total - listed, 0));
@@ -81,7 +82,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
     <div className="rounded-md border border-line bg-white p-3">
       <div className="mb-2 flex items-baseline justify-between">
         <p className="eyebrow">Payments</p>
-        <span className="text-[11px] text-muted">each valued at the rate you enter · saves as you type</span>
+        <span className="text-right text-[11px] text-muted">each valued at the rate you enter · bank charges = commission + foreign bank + SWIFT, without GST · saves as you type</span>
       </div>
 
       {rows.length === 0 ? (
@@ -104,7 +105,7 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
             const needsRate = foreign && x.status === "PAID" && !x.fxRate;
             return (
               <div key={x.id} className="rounded-md border border-line bg-surface p-2.5">
-                <div className={clsx("grid grid-cols-2 items-start gap-2", foreign ? "sm:grid-cols-[110px_1fr_1fr_1.3fr_auto]" : "sm:grid-cols-[110px_1fr_1fr_auto]")}>
+                <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-3">
                   <Lbl text="Payment">
                     <select value={x.type} onChange={(e) => update(x.id, { type: e.target.value as PaymentType })}
                       className="h-10 w-full rounded-sm border border-line bg-white px-2 text-[13px] text-ink focus:border-link focus:outline-none">
@@ -120,13 +121,16 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
                     <Num value={x.amount} onChange={(n) => update(x.id, { amount: n })} prefix={sym} placeholder="0" blankZero />
                   </Lbl>
                   {foreign && (
-                    <Lbl text={`${cur} rate on ${x.status === "PAID" ? "the day paid" : "payment day"} (₹ per ${sym}1)`}
+                    <Lbl text={`${cur} rate on ${x.status === "PAID" ? "day paid" : "payment day"} (₹ per ${sym}1)`}
                       note={needsRate ? "Enter the rate from the bank's debit advice" : undefined} warn={needsRate}>
                       <Num value={x.fxRate ?? 0} onChange={(n) => update(x.id, { fxRate: n > 0 ? n : undefined })} prefix="₹"
                         placeholder="from the bank's debit advice" blankZero />
                     </Lbl>
                   )}
-                  <div className="flex items-center gap-2 self-end pb-2.5">
+                  <Lbl text="Bank charges (₹)">
+                    <Num value={x.bankCharges ?? 0} onChange={(n) => update(x.id, { bankCharges: n > 0 ? n : undefined })} prefix="₹" placeholder="without GST" blankZero />
+                  </Lbl>
+                  <div className="flex h-10 items-center gap-3 self-end">
                     <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink">
                       <input type="checkbox" checked={x.status === "PAID"}
                         onChange={(e) => update(x.id, e.target.checked
@@ -161,6 +165,12 @@ export function PaymentsEditor({ p, onChange }: { p: Product; onChange: (next: P
         )}
       </div>
 
+      {rows.length > 0 && bankTotal > 0 && (
+        <p className="mt-2 text-[12px] text-body">
+          Bank charges on these payments: <span className="figure font-semibold text-ink">{inr(bankTotal)}</span>
+          <span className="text-muted"> · added to landed cost</span>
+        </p>
+      )}
       {rows.length > 0 && (
         <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
           <div className="rounded-md bg-go/10 px-2.5 py-2">

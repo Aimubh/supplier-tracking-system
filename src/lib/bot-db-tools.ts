@@ -61,7 +61,8 @@ function moneyOf(p: RawProduct): { qty: number; orderValue: number; advancePaid:
   const paid = goods.length ? goods.filter((x) => x.status === "PAID").reduce((a, x) => a + num(x.amount), 0) : num(w.advancePaid);
   const advancePaid = Math.min(paid, orderValue);
   const expenseFields = ["oceanFreight", "doCharge", "thcCharge", "cfsCharge", "wgmtCharge", "gstCharge", "dutyActual", "chaCharges", "lastMileCost", "otherExpense"];
-  const expenses = expenseFields.reduce((sum, k) => sum + num(e[k]), 0) + num(l.indiaTransportCost);
+  const bank = (Array.isArray(p.payments) ? p.payments : []).reduce((a: number, x: { bankCharges?: number }) => a + num(x?.bankCharges), 0);
+  const expenses = expenseFields.reduce((sum, k) => sum + num(e[k]), 0) + num(l.indiaTransportCost) + bank;
   return { qty: num(w.moq), orderValue, advancePaid, expenses, currency: String(w.rateCurrency ?? "INR") };
 }
 

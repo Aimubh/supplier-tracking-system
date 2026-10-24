@@ -146,6 +146,9 @@ export interface Payment {
   // Banks add a spread, so this is the true cost — it overrides both the live
   // rate and the historical market rate when converting this payment.
   fxRate?: number;
+  // What the bank debited for sending this payment (commission, foreign bank
+  // charges, SWIFT), in rupees, excluding GST - GST on it is input credit.
+  bankCharges?: number;
 }
 
 export interface PurchaseOrder {

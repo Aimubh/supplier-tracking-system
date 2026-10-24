@@ -177,6 +177,11 @@ export const EXPENSE_MONEY_FIELDS: ExpenseMoneyField[] = [
 // being in the product currency, matching the original behaviour. Returns the
 // total expressed in `to`. With rates=null, convert() is an identity, so this
 // degrades to the old raw sum (fine while rates load / for same-currency data).
+// Bank charges across all payments, in rupees (each payment's own debit advice).
+export function bankChargesInr(p: Product): number {
+  return (p.payments ?? []).reduce((a, x) => a + (x.bankCharges || 0), 0);
+}
+
 export function expensesIn(p: Product, to: CurrencyCode, rates: Rates | null): number {
   const e = p.expenses;
   const fields = EXPENSE_MONEY_FIELDS.reduce(
@@ -184,7 +189,7 @@ export function expensesIn(p: Product, to: CurrencyCode, rates: Rates | null): n
     0
   );
   const india = convert(p.logistics.indiaTransportCost || 0, prodCurrency(p), to, rates);
-  return fields + india;
+  return fields + india + convert(bankChargesInr(p), "INR", to, rates);
 }
 
 export interface OrderSummary {
@@ -206,6 +211,7 @@ export interface OrderSummary {
   cha: number;
   lastMile: number;
   other: number;
+  bank: number; // bank charges on the payments
   expensesTotal: number;
   // Landed
   finalExpense: number; // goods total + all expenses
@@ -270,7 +276,8 @@ export function computeOrderSummary(
   // Product Arrival step (India transport is in the product currency).
   const lastMile = ex("lastMileCost") + convert(L.indiaTransportCost || 0, base, base, rates);
   const other = ex("otherExpense");
-  const expensesTotal = freight + duty + cha + lastMile + other;
+  const bank = convert(bankChargesInr(p), "INR", base, rates);
+  const expensesTotal = freight + duty + cha + lastMile + other + bank;
 
   const finalExpense = goodsTotal + expensesTotal;
   const finalPerUnit = totalQty > 0 ? finalExpense / totalQty : 0;
@@ -315,6 +322,7 @@ export function computeOrderSummary(
     cha,
     lastMile,
     other,
+    bank,
     expensesTotal,
     finalExpense,
     finalPerUnit,
